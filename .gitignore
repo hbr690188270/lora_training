@@ -1,0 +1,6 @@
+ckpt/
+.pytest_cache/
+ckpt_phi35/
+datasets/
+model_cache/
+wandb/

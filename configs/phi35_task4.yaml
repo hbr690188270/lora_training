@@ -1,0 +1,3 @@
+include: configs/phi35_train_config.yaml
+task: glue_qnli_2_0_0
+output_dir: ckpt_phi35/glue_qnli_2_0_0

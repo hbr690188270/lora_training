@@ -1,0 +1,4 @@
+include: configs/general_train_config.yaml
+task: glue_qnli_2_0_0
+output_dir: ckpt/glue_qnli_2_0_0
+
