@@ -1,0 +1,3 @@
+include: configs/mistral_v3.yaml
+task: adversarial_qa_dbert_answer_the_following_q
+output_dir: ckpt/llama3/adversarial_qa_dbert_answer_the_following_q

@@ -1,0 +1,3 @@
+include: configs/mistral_v3.yaml
+task: dream_read_the_following_conversation_and_answer_the_question
+output_dir: ckpt/llama3/dream_read_the_following_conversation_and_answer_the_question

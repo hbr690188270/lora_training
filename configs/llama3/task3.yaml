@@ -1,0 +1,3 @@
+include: configs/llama3_train_config.yaml
+task: dream_read_the_following_conversation_and_answer_the_question
+output_dir: ckpt/llama3/dream_read_the_following_conversation_and_answer_the_question

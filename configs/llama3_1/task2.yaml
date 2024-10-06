@@ -1,0 +1,3 @@
+include: configs/llama31_train_config.yaml
+task: cos_e_v1_11_generate_explanation_given_text
+output_dir: ckpt/llama31/cos_e_v1_11_generate_explanation_given_text

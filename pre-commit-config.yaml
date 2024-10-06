@@ -1,0 +1,26 @@
+# .pre-commit-config.yaml
+
+repos:
+  # Ruff (code formatter and linter)
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.0.287
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  # Pylint (static analysis)
+  - repo: https://github.com/pre-commit/mirrors-pylint
+    rev: v2.17.5
+    hooks:
+      - id: pylint
+        args:
+          # Set the custom message template
+          - --msg-template="{abspath}:{line}: [{msg_id}({symbol}), {obj}] {msg}"
+
+          # Disable warnings for missing docstrings
+          - --disable=C0114  # Missing module docstring
+          - --disable=C0115  # Missing class docstring
+          - --disable=C0116  # Missing function docstring
+
+          # Disable import-error
+          - --disable=E0401  # Import error

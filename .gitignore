@@ -1,3 +1,6 @@
+__pycache__/
+*.pyc
+
 ckpt/
 .pytest_cache/
 ckpt_phi35/

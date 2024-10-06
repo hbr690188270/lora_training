@@ -1,3 +1,3 @@
 include: configs/general_train_config.yaml
 task: dream_read_the_following_conversation_and_answer_the_question
-output_dir: ckpt/dream_read_the_following_conversation_and_answer_the_question
+output_dir: ckpt/ph3_ckpt/dream_read_the_following_conversation_and_answer_the_question

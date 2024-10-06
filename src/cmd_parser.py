@@ -219,6 +219,11 @@ class ModelArguments:
     bnb_4bit_quant_storage: Optional[str] = field(
         default="uint8", metadata={"help": "storage type to pack the quanitzed 4-bit prarams."}
     )
+    model_name_for_short: str = field(
+        default="none",
+        metadata={"help": "the abbreviation of the model to be trained/evaluated."}
+    )
+
 
     def __post_init__(self):
         if self.load_in_8bit and self.load_in_4bit:
@@ -312,4 +317,5 @@ class SFTConfig(transformers.TrainingArguments):
     eval_packing: Optional[bool] = None
     num_of_sequences: Optional[int] = 1024
     chars_per_token: Optional[float] = 3.6
+    apply_chat_template: Optional[bool] = False
 

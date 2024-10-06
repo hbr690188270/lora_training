@@ -1,0 +1,3 @@
+include: configs/llama31_train_config.yaml
+task: adversarial_qa_dbert_answer_the_following_q
+output_dir: ckpt/llama31/adversarial_qa_dbert_answer_the_following_q

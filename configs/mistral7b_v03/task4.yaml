@@ -1,0 +1,4 @@
+include: configs/mistral_v3.yaml
+task: glue_qnli_2_0_0
+output_dir: ckpt/llama3/glue_qnli_2_0_0
+
