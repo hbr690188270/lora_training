@@ -54,9 +54,12 @@ class MyArgumentParser(HfArgumentParser):
                 - the dataclass instances in the same order as they were passed to the initializer.
         """
         main_config = yaml.safe_load(Path(yaml_file).read_text())
-        with open(main_config.pop("include"), "r") as include_file:
-            include_config = yaml.safe_load(include_file)
-        final_config = {**include_config, **main_config}
+        if "include" in main_config:
+            with open(main_config.pop("include"), "r") as include_file:
+                include_config = yaml.safe_load(include_file)
+            final_config = {**include_config, **main_config}
+        else:
+            final_config = main_config
 
         outputs = self.parse_dict(final_config, allow_extra_keys=allow_extra_keys)
         return tuple(outputs)

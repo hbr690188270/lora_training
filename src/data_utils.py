@@ -42,6 +42,36 @@ def get_tokenizer(
 
     return tokenizer
 
+def get_instruct_lm_tokenizer(
+    model_name_or_path,
+) -> PreTrainedTokenizer:
+    """
+    Get the tokenizer for the instruct lm.
+    Note: we already manually change the tokenizer_config.json and tokenizer.json
+        so that token index 128002 is mapped to <turn_end>, a special token for
+        the usage of chat template.
+    """
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path,
+        trust_remote_code=True,
+    )
+
+    if "llama3-8b" in model_name_or_path or "llama3_1-8b" in model_name_or_path:
+        tokenizer.pad_token = "<|finetune_right_pad_id|>"
+        tokenizer.pad_token_id = 128004
+    else:
+        raise NotImplementedError
+    tokenizer.truncation_side = "left"
+
+    assert tokenizer.pad_token is not None
+    assert tokenizer.pad_token_id is not None
+
+    # Set reasonable default for models without max length
+    if tokenizer.model_max_length > 100_000:
+        tokenizer.model_max_length = 2048
+
+    return tokenizer
+
 
 def load_from_general_dataset(
     taskname: str,
@@ -402,5 +432,38 @@ class DataCollatorCompletionOnly:
             completion_ids = [x["completion_ids"] for x in features]
             completion_ids = torch.LongTensor(completion_ids)
             batch["completion_ids"] = completion_ids
+        return batch
+
+@dataclass
+class DataCollatorForInstructLM:
+    tokenizer: PreTrainedTokenizerBase
+
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
+        length_list = [len(x['input_ids']) for x in features]
+        max_length = max(length_list)
+        all_input_ids = []
+        all_labels = []
+        all_attention_masks = []
+        for idx in range(len(features)):
+            curr_length = len(features[idx]['input_ids'])
+            difference = max_length - curr_length
+            # left padding
+            attention_mask = [0] * difference + [1] * curr_length
+            pad_input_ids = [self.tokenizer.pad_token_id] * difference + features[idx]['input_ids']
+            labels = [-100] * difference + features[idx]['labels']
+
+            all_input_ids.append(pad_input_ids)
+            all_labels.append(labels)
+            all_attention_masks.append(attention_mask)
+
+        all_input_ids = torch.LongTensor(all_input_ids)
+        all_labels = torch.LongTensor(all_labels)
+        all_attention_masks = torch.LongTensor(all_attention_masks)
+
+        batch = {
+            "input_ids": all_input_ids,
+            "labels": all_labels,
+            "attention_mask": all_attention_masks,
+        }
         return batch
 

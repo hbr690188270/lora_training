@@ -1,12 +1,12 @@
 """
-CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29502 --config_file configs/train_config.yaml train.py configs/task3.yaml
 
-CUDA_VISIBLE_DEVICES=5,6 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/ds_config.yaml train.py configs/llama2/task3.yaml
+CUDA_VISIBLE_DEVICES=0,2 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/ds_config.yaml train.py configs/llama2/task3.yaml
 """
 
 import logging
 import sys
 
+import numpy as np
 import torch
 import transformers
 from alignment import (
@@ -23,10 +23,11 @@ from src.cmd_parser import (
     SFTConfig,
 )
 from src.data_utils import (
-    DataCollatorCompletionOnly,
-    DataCollatorWithPaddingSFT,
-    get_tokenizer,
-    load_taskdataset,
+    DataCollatorForInstructLM,
+    get_instruct_lm_tokenizer,
+)
+from src.experiments.instruct_lm.input_preprocess import (
+    instruct_lm_preprocessor,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,45 +66,29 @@ def main():
 
     apply_chat_template = training_args.apply_chat_template
 
-    tokenizer = get_tokenizer(
+    tokenizer = get_instruct_lm_tokenizer(
         model_args.model_name_or_path,
     )
-    if apply_chat_template:
-        if "llama3-8b-instruct" in model_args.model_name_or_path or "llama3_1-8b-instruct" in model_args.model_name_or_path:
-            response_template = "<|start_header_id|>assistant<|end_header_id|>\n\n"
-            response_token_ids = tokenizer.encode(response_template, add_special_tokens=False)
-        elif "llama2-7b-chat" in model_args.model_name_or_path:
-            response_template = "[/INST]"
-            response_token_ids = tokenizer.encode(response_template, add_special_tokens=False)
-        elif "mistral-7b-instruct-v3" in model_args.model_name_or_path:
-            response_template = "[/INST]"
-            response_token_ids = tokenizer.encode(response_template, add_special_tokens=False)
-        print(f"response_template: {response_template}")
-        data_collator = DataCollatorCompletionOnly(
-            response_token_ids=response_token_ids,
-            tokenizer=tokenizer,
-            padding=transformers.utils.PaddingStrategy.LONGEST,
-            max_length=768,
-        )
-
-    else:
-        data_collator = DataCollatorWithPaddingSFT(
-            tokenizer=tokenizer,
-            padding=transformers.utils.PaddingStrategy.LONGEST,
-            max_length=768,
-        )
-
-    assert training_args.task is not None
-    dataset_dict = load_taskdataset(
-        taskname=training_args.task,
+    preprocessor = instruct_lm_preprocessor(
         tokenizer=tokenizer,
-        apply_chat_template=apply_chat_template
+        max_len=2048,
+        eot_id=128002,
+        prepend_eos=False,
+    )
+
+    data_collator = DataCollatorForInstructLM(
+        tokenizer=tokenizer,
+    )
+
+    dataset = datasets.load_dataset("nvidia/Daring-Anteater", split="train")
+    dataset = dataset.map(
+        preprocessor.process_daring_anteater,
+        num_proc=32,
+        remove_columns=["source", "target"],
+        batched=False,
     )
 
     logger.info("*** Load pretrained model ***")
-    # torch_dtype = (
-    #     model_args.torch_dtype if model_args.torch_dtype in ["auto", None] else getattr(torch, model_args.torch_dtype)
-    # )
 
     torch_dtype = torch.bfloat16
     model_kwargs = dict(
@@ -118,30 +103,20 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
     model = get_peft_model(model, get_peft_config(model_args))
-    # model, tokenizer = setup_chat_format(model, tokenizer)
-    model_kwargs = None
     model.print_trainable_parameters()
 
-    train_dataset = dataset_dict["train"]
-    eval_dataset = dataset_dict["val"]
-    test_dataset = dataset_dict["test"]
-
-    # with training_args.main_process_first(desc="Log a few random samples from the processed training set"):
-    #     for index in random.sample(range(len(dataset_dict["train"])), 3):
-    #         logger.info(f"Sample {index} of the processed training set:\n\n{dataset_dict['train'][index]['text']}")
-
-    # trainer = SFTTrainer(
-    #     model=model,
-    #     model_init_kwargs=model_kwargs,
-    #     args=training_args,
-    #     train_dataset=train_dataset,
-    #     eval_dataset=eval_dataset,
-    #     # max_seq_length=training_args.max_seq_length,
-    #     tokenizer=tokenizer,
-    #     packing=False,
-    #     peft_config=get_peft_config(model_args),
-    #     dataset_kwargs=training_args.dataset_kwargs,
-    # )
+    train_dataset = dataset.shuffle()
+    num_examples = len(train_dataset)
+    train_dataset = train_dataset.select(np.arange(int(num_examples * 0.9)))
+    eval_dataset = train_dataset.select(
+        np.arange(int(num_examples * 0.9), int(num_examples * 0.95)),
+    )
+    test_dataset = train_dataset.select(
+        np.arange(int(num_examples * 0.95), num_examples,)
+    )
+    print(train_dataset)
+    print(eval_dataset)
+    print(test_dataset)
 
     output_dir = training_args.output_dir
     lora_alpha = model_args.lora_alpha
@@ -185,9 +160,7 @@ def main():
     trainer.log_metrics("eval", metrics)
     trainer.save_metrics("eval", metrics)
 
-
     logger.info("*** Training complete ***")
 
 
-if __name__ == "__main__":
-    main()
+

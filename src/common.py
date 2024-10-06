@@ -1,6 +1,7 @@
-import torch
 import numpy as np
+import torch
 from transformers.tokenization_utils_base import BatchEncoding
+
 
 def move_to_target_device(object, device):
     if torch.is_tensor(object):
