@@ -19,8 +19,8 @@ CUDA_VISIBLE_DEVICES=0 python eval.py \
 
 CUDA_VISIBLE_DEVICES=4 python eval.py \
     --task=dream_read_the_following_conversation_and_answer_the_question \
-    --model=llama31 \
-    --adapter_source=llama3 \
+    --model=mistral \
+    --adapter_source=llama2 \
     --apply_chat_template
 """
 
@@ -52,6 +52,8 @@ MODEL_NAME_CONVERTER = {
     "phi35": "model_cache/phi-3.5-mini-instruct",
     "llama3": "model_cache/llama3-8b-instruct",
     "llama31": "model_cache/llama3_1-8b-instruct",
+    "llama2": "model_cache/llama2-7b-chat",
+    "mistral": "model_cache/mistral-7b-instruct-v3",
 }
 FLAGS = flags.FLAGS
 
@@ -74,7 +76,9 @@ def set_eval_args():
             "phi3",
             "phi35",
             "llama3",
-            "llama31"
+            "llama31",
+            "llama2",
+            "mistral"
         ],
         help="model to be evauated.",
     )
@@ -86,6 +90,8 @@ def set_eval_args():
             "phi35",
             "llama3",
             "llama31",
+            "llama2",
+            "mistral"
             "none", # none means we do not load adpaters
         ],
         help="which model's adapter to load. None means do not load any adapters",
@@ -108,9 +114,15 @@ def main(argv):
         model_name_or_path,
     )
     if FLAGS.apply_chat_template:
-        assert FLAGS.model in ["llama3", "llama31"]
-        response_template = "<|start_header_id|>assistant<|end_header_id|>\n\n"
-        response_token_ids = tokenizer.encode(response_template, add_special_tokens=False)
+        if "llama3-8b-instruct" in model_name_or_path or "llama3_1-8b-instruct" in model_name_or_path:
+            response_template = "<|start_header_id|>assistant<|end_header_id|>\n\n"
+            response_token_ids = tokenizer.encode(response_template, add_special_tokens=False)
+        elif "llama2-7b-chat" in model_name_or_path:
+            response_template = "[/INST]"
+            response_token_ids = tokenizer.encode(response_template, add_special_tokens=False)
+        elif "mistral-7b-instruct-v3" in model_name_or_path:
+            response_template = "[/INST]"
+            response_token_ids = tokenizer.encode(response_template, add_special_tokens=False)
         print(f"response_template: {response_template}")
         data_collator = DataCollatorCompletionOnly(
             response_token_ids=response_token_ids,
