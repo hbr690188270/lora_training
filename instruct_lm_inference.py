@@ -1,38 +1,22 @@
 """
-CUDA_VISIBLE_DEVICES=4 python gen.py \
-    --task=dream_read_the_following_conversation_and_answer_the_question \
-    --model=llama31 \
-    --adapter_source=llama3 \
-    --apply_chat_template
-
-CUDA_VISIBLE_DEVICES=5 python gen.py \
-    --task=dream_read_the_following_conversation_and_answer_the_question \
-    --model=llama31 \
-    --adapter_source=none \
-    --apply_chat_template
-
-CUDA_VISIBLE_DEVICES=6 python gen.py \
-    --task=dream_read_the_following_conversation_and_answer_the_question \
-    --model=llama31 \
-    --adapter_source=llama31 \
-    --apply_chat_template
+CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
+    --task=ifeval \
+    --model=llama3 \
+    --adapter_source=llama3
 """
 
+import json
 import logging
 
-import datasets
-import json
-import numpy as np
 import torch
 import tqdm
 import transformers
 from absl import app, flags
-from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM
 
+import datasets
 from src.common import move_to_target_device
 from src.data_utils import (
-    DataCollatorForInstructLM,
     get_instruct_lm_tokenizer,
 )
 from src.experiments.instruct_lm.input_preprocess import (
@@ -88,12 +72,13 @@ def main(argv):
     tokenizer = get_instruct_lm_tokenizer(
         model_name_or_path,
     )
-    if dataset == "ifeval":
+    if FLAGS.task == "ifeval":
         dataset = datasets.load_dataset("google/IFEval", split="train")
         prompts = dataset["prompt"]
         prompts = [apply_chat_template(x) for x in prompts]
     else:
         raise NotImplementedError
+    print(prompts[:3])
 
     prompt_tokens_ids = tokenizer(
         prompts,
@@ -115,6 +100,7 @@ def main(argv):
         cache_dir='./model_cache'
     )
 
+    print(model_name_or_path)
     model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
     model = model.to(device)
 

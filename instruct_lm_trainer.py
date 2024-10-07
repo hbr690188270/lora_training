@@ -12,7 +12,6 @@ import numpy as np
 import torch
 import transformers
 from peft import LoraConfig, get_peft_model
-
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
 import datasets
@@ -114,8 +113,11 @@ def main():
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
-    dataset = dataset.shuffle()
+    np.random.seed(222)
     num_examples = len(dataset)
+    rand_indices = np.random.permutation(num_examples)
+    dataset = dataset.select(rand_indices)
+    # dataset = dataset.shuffle()
     train_dataset = dataset.select(np.arange(int(num_examples * 0.9)))
     eval_dataset = dataset.select(
         np.arange(int(num_examples * 0.9), int(num_examples * 0.95)),
@@ -152,7 +154,8 @@ def main():
 
 
     logger.info("*** Train ***")
-    train_result = trainer.train(resume_from_checkpoint=None)
+    # train_result = trainer.train(resume_from_checkpoint=None)
+    train_result = trainer.train(resume_from_checkpoint=True)
     metrics = train_result.metrics
     metrics["train_samples"] = len(train_dataset)
     trainer.log_metrics("train", metrics)
