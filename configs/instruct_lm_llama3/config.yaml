@@ -14,7 +14,7 @@ gradient_accumulation_steps: 2
 gradient_checkpointing: false
 gradient_checkpointing_kwargs:
   use_reentrant: False
-save_only_model: true
+save_only_model: false
 hub_model_id: meta-llama/Meta-Llama-3-8B
 learning_rate: 2.0e-5
 log_level: info

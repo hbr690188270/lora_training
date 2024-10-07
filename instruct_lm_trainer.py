@@ -8,13 +8,13 @@ import logging
 import sys
 
 import accelerate
+import datasets
 import numpy as np
 import torch
 import transformers
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
-import datasets
 from src.cmd_parser import (
     DataArguments,
     ModelArguments,
@@ -154,8 +154,8 @@ def main():
 
 
     logger.info("*** Train ***")
-    # train_result = trainer.train(resume_from_checkpoint=None)
-    train_result = trainer.train(resume_from_checkpoint=True)
+    train_result = trainer.train(resume_from_checkpoint=None)
+    # train_result = trainer.train(resume_from_checkpoint=True)
     metrics = train_result.metrics
     metrics["train_samples"] = len(train_dataset)
     trainer.log_metrics("train", metrics)
