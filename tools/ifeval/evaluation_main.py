@@ -6,6 +6,16 @@ python tools/ifeval/evaluation_main.py \
     --input_response_data=generations/ifeval_logs_llama3_to_llama3.jsonl \
     --output_dir=generations/
 
+python tools/ifeval/evaluation_main.py \
+    --input_data=tools/ifeval/data/input_data.jsonl \
+    --input_response_data=generations/ifeval_logs_llama3_to_llama312.jsonl \
+    --output_dir=generations/
+
+python tools/ifeval/evaluation_main.py \
+    --input_data=tools/ifeval/data/input_data.jsonl \
+    --input_response_data=generations/ifeval_logs_llama3_converted_to_llama312.jsonl \
+    --output_dir=generations/
+
 """
 
 import collections

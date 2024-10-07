@@ -11,6 +11,11 @@ CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
 
 CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
     --task=ifeval \
+    --model=llama3 \
+    --adapter_source=none
+
+CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
+    --task=ifeval \
     --model=llama31 \
     --adapter_source=llama3_converted
 """
@@ -144,7 +149,7 @@ def main(argv):
         stop_strings=["<turn_end>"]
     )
 
-    batch_size = 8
+    batch_size = 2
     all_batches = []
     curr_batch = []
     for idx in range(len(prompt_tokens_ids)):
