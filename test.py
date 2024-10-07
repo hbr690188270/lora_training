@@ -1,21 +1,18 @@
-from safetensors import safe_open
-from safetensors.torch import save_file
+import json
 
+path1 = "generations/ifeval_logs_llama3_to_llama3.jsonl"
+path2 = "generations/ifeval_logs_llama3_to_llama31.jsonl"
+path3 = "generations/ifeval_logs_llama3_to_llama312.jsonl"
 
-def load_lora_weights():
-    adapter_path = "ckpt/instruct_lm/llama3_alpha128_r64/checkpoint-4000/adapter_model.safetensors"
-    tensors = {}
-    with safe_open(adapter_path, framework="pt", device="cpu") as f:
-        for key in f.keys():
-            tensors[key] = f.get_tensor(key)
-    return tensors
+ref_logs = [json.loads(x) for x in open(path1).readlines()]
+to_revise = [json.loads(x) for x in open(path2).readlines()]
 
-def main():
-    tensors = load_lora_weights()
-    for k,v in tensors.items():
-        print(f"{k}: {v.shape}")
+ref_prompts = [x["prompt"] for x in ref_logs]
+revised = []
+for idx, log in enumerate(to_revise):
+    log["prompt"] = ref_prompts[idx]
+    revised.append(log)
 
-if __name__ == "__main__":
-    main()
-
-
+with open(path2, "w") as f:
+    for item in revised:
+        f.write(json.dumps(item) + "\n")

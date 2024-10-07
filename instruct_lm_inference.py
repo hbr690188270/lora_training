@@ -3,6 +3,16 @@ CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
     --task=ifeval \
     --model=llama3 \
     --adapter_source=llama3
+
+CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
+    --task=ifeval \
+    --model=llama31 \
+    --adapter_source=llama3
+
+CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
+    --task=ifeval \
+    --model=llama31 \
+    --adapter_source=llama3_converted
 """
 
 import json
@@ -12,7 +22,8 @@ import torch
 import tqdm
 import transformers
 from absl import app, flags
-from transformers import AutoModelForCausalLM
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
 import datasets
 from src.common import move_to_target_device
@@ -55,6 +66,7 @@ def set_eval_args():
         None,
         [
             "llama3",
+            "llama3_converted",
             "llama31",
             "none", # none means we do not load adpaters
         ],
@@ -101,13 +113,24 @@ def main(argv):
     )
 
     print(model_name_or_path)
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
+    model: LlamaForCausalLM = AutoModelForCausalLM.from_pretrained(
+        model_name_or_path,
+        **model_kwargs
+    )
     model = model.to(device)
 
     if FLAGS.adapter_source != "none":
-        adapter_dir = f"ckpt/insruct_lm/{FLAGS.adapter_source}_alpha128_r64/"
-        model.load_adapter(adapter_dir, adapter_name = "sft")
-        model.set_adapter(["sft"])
+        if FLAGS.adapter_source == "llama3_converted":
+            adapter_dir = "ckpt/instruct_lm/llama3_for_llama31/"
+            print("use the updated lora version")
+        else:
+            # adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/"
+            adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/checkpoint-6000"
+        # model.load_adapter(adapter_dir, adapter_name = "sft")
+        # model.set_adapter(["sft"])
+        model: LlamaForCausalLM = PeftModel.from_pretrained(model, adapter_dir)
+        # model.merge_and_unload(progressbar=True)
+        # model = model.model
 
     model.eval()
 
@@ -115,13 +138,13 @@ def main(argv):
     logger.info("*** Generation ***")
 
     generation_config = transformers.GenerationConfig(
-        max_new_tokens = 128,
+        max_new_tokens = 1000,
         do_sample=False,
         num_beams=1,
         stop_strings=["<turn_end>"]
     )
 
-    batch_size = 4
+    batch_size = 8
     all_batches = []
     curr_batch = []
     for idx in range(len(prompt_tokens_ids)):
@@ -132,6 +155,7 @@ def main(argv):
             curr_batch = []
 
     generation_logs = []
+    global_index = 0
 
     with torch.no_grad():
         for batch in tqdm.tqdm(all_batches):
@@ -143,8 +167,8 @@ def main(argv):
                 difference = max_length - curr_length
                 attention_mask = [0] * difference + [1] * curr_length
                 pad_input_ids = [tokenizer.pad_token_id] * difference + prompt_idxs
-            all_input_ids.append(pad_input_ids)
-            all_attention_masks.append(attention_mask)
+                all_input_ids.append(pad_input_ids)
+                all_attention_masks.append(attention_mask)
 
             prefix = torch.LongTensor(all_input_ids)
             attention_mask = torch.LongTensor(all_attention_masks)
@@ -154,27 +178,29 @@ def main(argv):
             outputs = model.generate(
                 inputs=prefix,
                 generation_config=generation_config,
-                return_dict_in_generate=True
+                return_dict_in_generate=True,
+                tokenizer=tokenizer,
+                attention_mask=attention_mask,
             )
             input_length = prefix.shape[1]
-            print(type(outputs))
             generated_token_ids = outputs.sequences[:, input_length:]
             generated_texts = [tokenizer.decode(x, skip_special_tokens=True) for x in generated_token_ids]
 
-            prompts = [tokenizer.decode(x, skip_special_tokens=True) for x in prefix]
+            # prompts = [tokenizer.decode(x, skip_special_tokens=True) for x in prefix]
 
             for idx in range(len(generated_texts)):
-                print(f"prompt: {prompts[idx]}")
+                print(f"prompt: {prompts[global_index]}")
                 print(f"generation: {generated_texts[idx]}")
                 print("\n\n")
 
                 log = {
-                    "prompt": prompts[idx],
+                    "prompt": prompts[global_index],
                     "response": generated_texts[idx],
                 }
                 generation_logs.append(log)
-    
-    with open("ifeval_logs.jsonl", "w") as f:
+                global_index += 1
+
+    with open(f"generations/ifeval_logs_{FLAGS.adapter_source}_to_{FLAGS.model}.jsonl", "w") as f:
         for log in generation_logs:
             f.write(json.dumps(log) + "\n")
 
