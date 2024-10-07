@@ -139,6 +139,7 @@ def preprocess_fn(
             add_special_tokens=False,
         )
         input_ids = tokenized_result["input_ids"]
+        print(tokenized_result.keys())
         processed_examples = {
             "input_ids": input_ids,
         }
@@ -309,15 +310,23 @@ class DataCollatorWithPaddingSFT:
         source_length_list = [x["source_length"] for x in features]
         max_length = max(length_list)
         all_input_ids = []
+        all_attention_masks = []
         for idx in range(len(features)):
             curr_length = len(features[idx]['input_ids'])
+            difference = max_length - curr_length
             if self.for_generation:
                 # left padding
+                attention_mask = [0] * difference + [1] * curr_length
                 pad_input_ids = [self.tokenizer.pad_token_id] * (max_length - curr_length) + features[idx]['input_ids']
             else:
+                attention_mask = [1] * curr_length + [0] * difference
                 pad_input_ids = features[idx]['input_ids'] + [self.tokenizer.eos_token_id] + [self.tokenizer.pad_token_id] * (max_length - curr_length)
             all_input_ids.append(pad_input_ids)
+            all_attention_masks.append(attention_mask)
+
         all_input_ids = torch.LongTensor(all_input_ids)
+        all_attention_masks = torch.LongTensor(all_attention_masks)
+        batch["attention_mask"] = all_attention_masks
 
         if self.for_generation:
             batch['prefix'] = all_input_ids
@@ -388,12 +397,18 @@ class DataCollatorCompletionOnly:
         length_list = [len(x['input_ids']) for x in features]
         max_length = max(length_list)
         all_input_ids = []
+        all_attention_masks = []
         for idx in range(len(features)):
             curr_length = len(features[idx]['input_ids'])
+            difference = max_length - curr_length
+            attention_mask = [1] * curr_length + [1] + [0] * difference
             pad_input_ids = features[idx]['input_ids'] + [self.tokenizer.eos_token_id] + [self.tokenizer.pad_token_id] * (max_length - curr_length)
             all_input_ids.append(pad_input_ids)
+            all_attention_masks.append(attention_mask)
         all_input_ids = torch.LongTensor(all_input_ids)
+        all_attention_masks = torch.LongTensor(all_attention_masks)
         batch['input_ids'] = all_input_ids
+        batch["attention_mask"] = all_attention_masks
 
         labels = batch["input_ids"].clone()
         if self.tokenizer.pad_token_id is not None:
@@ -452,7 +467,7 @@ class DataCollatorForInstructLM:
             pad_input_ids = [self.tokenizer.pad_token_id] * difference + features[idx]['input_ids']
             labels = [-100] * difference + features[idx]['labels']
 
-            # attention_mask = [1] * curr_length + [0] * difference 
+            # attention_mask = [1] * curr_length + [0] * difference
             # pad_input_ids = features[idx]['input_ids'] + [self.tokenizer.pad_token_id] * difference
             # labels = features[idx]['labels'] + [-100] * difference
 

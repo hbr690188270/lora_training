@@ -17,10 +17,10 @@ CUDA_VISIBLE_DEVICES=0 python eval.py \
     --model=llama3 \
     --apply_chat_template
 
-CUDA_VISIBLE_DEVICES=4 python eval.py \
+CUDA_VISIBLE_DEVICES=2 python eval.py \
     --task=dream_read_the_following_conversation_and_answer_the_question \
     --model=mistral \
-    --adapter_source=llama2 \
+    --adapter_source=llama3 \
     --apply_chat_template
 """
 
@@ -204,6 +204,8 @@ def main(argv):
     all_loss = []
     with torch.no_grad():
         for batch in tqdm.tqdm(eval_dataloader):
+            print(batch.keys())
+            pause = input("???")
             batch = move_to_target_device(batch, device)
             outputs = model(**batch)
             loss = outputs.loss
