@@ -9,7 +9,7 @@ use_flash_attention_2: true
 bf16: true
 do_eval: true
 evaluation_strategy: steps
-eval_steps: 250
+eval_steps: 1000
 gradient_accumulation_steps: 2
 gradient_checkpointing: false
 gradient_checkpointing_kwargs:
@@ -28,11 +28,12 @@ lora_alpha: 128
 # lora_r: 16
 # lora_target_modules: [qkv_proj, o_proj,gate_up_proj,down_proj]
 lora_target_modules: [q_proj, k_proj, v_proj, o_proj]
+lora_modules_to_save: ["embed_tokens","lm_head"]
 per_device_train_batch_size: 2
 per_device_eval_batch_size: 2
 push_to_hub: false
 save_strategy: "steps"
-save_steps: 500
+save_steps: 2000
 save_total_limit: 4
 seed: 42
 warmup_ratio: 0.1

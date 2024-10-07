@@ -61,7 +61,7 @@ def get_instruct_lm_tokenizer(
         tokenizer.pad_token_id = 128004
     else:
         raise NotImplementedError
-    tokenizer.truncation_side = "left"
+    # tokenizer.truncation_side = "left"
 
     assert tokenizer.pad_token is not None
     assert tokenizer.pad_token_id is not None
@@ -451,6 +451,10 @@ class DataCollatorForInstructLM:
             attention_mask = [0] * difference + [1] * curr_length
             pad_input_ids = [self.tokenizer.pad_token_id] * difference + features[idx]['input_ids']
             labels = [-100] * difference + features[idx]['labels']
+
+            # attention_mask = [1] * curr_length + [0] * difference 
+            # pad_input_ids = features[idx]['input_ids'] + [self.tokenizer.pad_token_id] * difference
+            # labels = features[idx]['labels'] + [-100] * difference
 
             all_input_ids.append(pad_input_ids)
             all_labels.append(labels)

@@ -1,12 +1,20 @@
 import datasets
 from transformers import AutoTokenizer
 
-text = " user\n\n\n"
-tokenizer = AutoTokenizer.from_pretrained("model_cache/llama3-8b-instruct")
-res = tokenizer(text,                add_special_tokens=False,
-                padding=False,
-                truncation=False,
-                return_tensors=None,
-)
+tokenizer = AutoTokenizer.from_pretrained("model_cache/llama3-8b")
+text_ids = [11,   262,    13,   449,  1403,   893,   323,   264,  6500,  6500,
+           11,   578, 15836,  3834,    32,   264,  2068,  2068,   311,  5829,
+          264,  4382,   369,   649,   682, 44537,   323, 24370,   279,  1510,
+         1614,   315,   279,  2068,    13, 45848,    13,  1217,   198,    32,
+          264, 13325,  2068,   430,  5280,   264,  7158,   430, 38934, 13939,
+        44537,   323, 27024,   279,  1510,  1614,   315,   279,  3851,  1603,
+        45848,   627, 18328,   198,  8144,   596,   264,  2294,  4623,     0,
+         4800,    11,  1095,  1390,  1093,   499,  1518,   279,  2068,   315,
+          279,  2068,   311,  2997,  5361,  3932,    13,   779,   449,   872,
+         1866, 19882,    13,  3053,  1053,   584,   656,   279,  2068,  2082]
 
-print(res["input_ids"])
+text_ids = [18328,    198,   8144,    264,  13325,   2068,    430,   5280,
+           264,   7158,    430,  38934,  13939,  44537,    323,  27024,    279,
+          1510,   1614,    315,    279,   3851,   1603,  45848, 128002,]
+text = tokenizer.decode(text_ids)
+print(text)

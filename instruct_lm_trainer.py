@@ -1,18 +1,18 @@
 """
-
-CUDA_VISIBLE_DEVICES=0,2 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/ds_config.yaml train.py configs/llama2/task3.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_ddp_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_zero3_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
 """
 
 import logging
 import sys
 
+import accelerate
 import numpy as np
 import torch
 import transformers
-from alignment import (
-    get_peft_config,
-)
-from peft import get_peft_model
+from peft import LoraConfig, get_peft_model
+
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
 import datasets
@@ -84,7 +84,7 @@ def main():
     dataset = dataset.map(
         preprocessor.process_daring_anteater,
         num_proc=32,
-        remove_columns=["source", "target"],
+        remove_columns=['system', 'mask', 'dataset', 'conversations'],
         batched=False,
     )
 
@@ -102,16 +102,25 @@ def main():
     )
 
     model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
-    model = get_peft_model(model, get_peft_config(model_args))
+    peft_config = LoraConfig(
+        r=model_args.lora_r,
+        lora_alpha=model_args.lora_alpha,
+        lora_dropout=model_args.lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM",
+        target_modules=model_args.lora_target_modules,
+        modules_to_save=model_args.lora_modules_to_save,
+    )
+    model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
-    train_dataset = dataset.shuffle()
-    num_examples = len(train_dataset)
-    train_dataset = train_dataset.select(np.arange(int(num_examples * 0.9)))
-    eval_dataset = train_dataset.select(
+    dataset = dataset.shuffle()
+    num_examples = len(dataset)
+    train_dataset = dataset.select(np.arange(int(num_examples * 0.9)))
+    eval_dataset = dataset.select(
         np.arange(int(num_examples * 0.9), int(num_examples * 0.95)),
     )
-    test_dataset = train_dataset.select(
+    test_dataset = dataset.select(
         np.arange(int(num_examples * 0.95), num_examples,)
     )
     print(train_dataset)
@@ -126,7 +135,7 @@ def main():
     if apply_chat_template:
         output_dir += "_chat"
     training_args.output_dir = output_dir
-    runname = f"{model_args.model_name_for_short}-{training_args.task}-alpha{lora_alpha}-r{lora_r}"
+    runname = f"llama3-instructlm-alpha{lora_alpha}-r{lora_r}"
     training_args.run_name = runname
 
     trainer = Trainer(
@@ -137,6 +146,9 @@ def main():
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
+
+    accelerator = accelerate.Accelerator()
+    trainer = accelerator.prepare(trainer)
 
 
     logger.info("*** Train ***")
@@ -162,5 +174,8 @@ def main():
 
     logger.info("*** Training complete ***")
 
+
+if __name__ == "__main__":
+    main()
 
 

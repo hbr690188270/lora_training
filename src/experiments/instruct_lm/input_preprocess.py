@@ -97,7 +97,7 @@ class instruct_lm_preprocessor():
 
         for idx in range(0, len(texts), 2):
             user_text = texts[idx]
-            assistant_text = texts[idx]
+            assistant_text = texts[idx + 1]
             assert roles[idx] == 0
             assert roles[idx + 1] == 1
 
