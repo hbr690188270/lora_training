@@ -1,20 +1,21 @@
-import datasets
-from transformers import AutoTokenizer
+from safetensors import safe_open
+from safetensors.torch import save_file
 
-tokenizer = AutoTokenizer.from_pretrained("model_cache/llama3-8b")
-text_ids = [11,   262,    13,   449,  1403,   893,   323,   264,  6500,  6500,
-           11,   578, 15836,  3834,    32,   264,  2068,  2068,   311,  5829,
-          264,  4382,   369,   649,   682, 44537,   323, 24370,   279,  1510,
-         1614,   315,   279,  2068,    13, 45848,    13,  1217,   198,    32,
-          264, 13325,  2068,   430,  5280,   264,  7158,   430, 38934, 13939,
-        44537,   323, 27024,   279,  1510,  1614,   315,   279,  3851,  1603,
-        45848,   627, 18328,   198,  8144,   596,   264,  2294,  4623,     0,
-         4800,    11,  1095,  1390,  1093,   499,  1518,   279,  2068,   315,
-          279,  2068,   311,  2997,  5361,  3932,    13,   779,   449,   872,
-         1866, 19882,    13,  3053,  1053,   584,   656,   279,  2068,  2082]
 
-text_ids = [18328,    198,   8144,    264,  13325,   2068,    430,   5280,
-           264,   7158,    430,  38934,  13939,  44537,    323,  27024,    279,
-          1510,   1614,    315,    279,   3851,   1603,  45848, 128002,]
-text = tokenizer.decode(text_ids)
-print(text)
+def load_lora_weights():
+    adapter_path = "ckpt/instruct_lm/llama3_alpha128_r64/checkpoint-4000/adapter_model.safetensors"
+    tensors = {}
+    with safe_open(adapter_path, framework="pt", device="cpu") as f:
+        for key in f.keys():
+            tensors[key] = f.get_tensor(key)
+    return tensors
+
+def main():
+    tensors = load_lora_weights()
+    for k,v in tensors.items():
+        print(f"{k}: {v.shape}")
+
+if __name__ == "__main__":
+    main()
+
+
