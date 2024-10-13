@@ -1,5 +1,5 @@
 """
-CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
+CUDA_VISIBLE_DEVICES=3 python instruct_lm_inference.py \
     --task=ifeval \
     --model=llama3 \
     --adapter_source=llama3
@@ -7,17 +7,18 @@ CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
 CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
     --task=ifeval \
     --model=llama31 \
-    --adapter_source=llama3
+    --adapter_source=llama31
 
-CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
+CUDA_VISIBLE_DEVICES=1 python instruct_lm_inference.py \
     --task=ifeval \
-    --model=llama3 \
+    --model=llama31 \
     --adapter_source=none
 
-CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
+CUDA_VISIBLE_DEVICES=0 python instruct_lm_inference.py \
     --task=ifeval \
     --model=llama31 \
     --adapter_source=llama3_converted
+
 """
 
 import json
@@ -91,8 +92,8 @@ def main(argv):
     )
     if FLAGS.task == "ifeval":
         dataset = datasets.load_dataset("google/IFEval", split="train")
-        prompts = dataset["prompt"]
-        prompts = [apply_chat_template(x) for x in prompts]
+        orig_prompts = dataset["prompt"]
+        prompts = [apply_chat_template(x) for x in orig_prompts]
     else:
         raise NotImplementedError
     print(prompts[:3])
@@ -130,7 +131,8 @@ def main(argv):
             print("use the updated lora version")
         else:
             # adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/"
-            adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/checkpoint-6000"
+            # adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/checkpoint-6000"
+            adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/checkpoint-16797"
         # model.load_adapter(adapter_dir, adapter_name = "sft")
         # model.set_adapter(["sft"])
         model: LlamaForCausalLM = PeftModel.from_pretrained(model, adapter_dir)
@@ -143,10 +145,12 @@ def main(argv):
     logger.info("*** Generation ***")
 
     generation_config = transformers.GenerationConfig(
-        max_new_tokens = 1000,
+        max_new_tokens=1000,
         do_sample=False,
         num_beams=1,
-        stop_strings=["<turn_end>"]
+        stop_strings=["<turn_end>"],
+        pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=tokenizer.pad_token_id,
     )
 
     batch_size = 2
@@ -194,12 +198,12 @@ def main(argv):
             # prompts = [tokenizer.decode(x, skip_special_tokens=True) for x in prefix]
 
             for idx in range(len(generated_texts)):
-                print(f"prompt: {prompts[global_index]}")
+                print(f"prompt: {orig_prompts[global_index]}")
                 print(f"generation: {generated_texts[idx]}")
                 print("\n\n")
 
                 log = {
-                    "prompt": prompts[global_index],
+                    "prompt": orig_prompts[global_index],
                     "response": generated_texts[idx],
                 }
                 generation_logs.append(log)

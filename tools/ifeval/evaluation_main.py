@@ -13,7 +13,7 @@ python tools/ifeval/evaluation_main.py \
 
 python tools/ifeval/evaluation_main.py \
     --input_data=tools/ifeval/data/input_data.jsonl \
-    --input_response_data=generations/ifeval_logs_llama3_converted_to_llama312.jsonl \
+    --input_response_data=generations/ifeval_logs_llama3_converted_to_llama31.jsonl \
     --output_dir=generations/
 
 """

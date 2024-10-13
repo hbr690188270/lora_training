@@ -8,7 +8,7 @@ from transformers import (
 
 
 def load_lora_weights():
-    adapter_path = "ckpt/instruct_lm/llama3_alpha128_r64/checkpoint-6000/adapter_model.safetensors"
+    adapter_path = "ckpt/instruct_lm/llama3_alpha128_r64/checkpoint-16797/adapter_model.safetensors"
     tensors = {}
     with safe_open(adapter_path, framework="pt", device="cpu") as f:
         for key in f.keys():
