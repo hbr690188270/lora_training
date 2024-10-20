@@ -3,18 +3,22 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
-name = "my_project"
+name = "lora_transfer"
 version = "0.1.0"
-description = "A sample Python project"
+description = "LoRA transfer project"
 authors = ["Bairu Hou <bairu@ucsb.eud>"]
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/example/my_project"
+repository = "https://github.com/hbr690188270/lora_training"
+packages = [
+    { include = "src" },
+    { include = "tools" }
+]
+
 
 [tool.poetry.dependencies]
 python = "^3.9"
 requests = "^2.26.0"
-flask = "^2.0.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2"

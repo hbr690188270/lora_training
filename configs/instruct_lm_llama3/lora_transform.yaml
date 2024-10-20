@@ -1,0 +1,41 @@
+# Model arguments
+model_name_or_path: model_cache/llama3_1-8b
+model_name_for_short: llama3-8b
+torch_dtype: null
+use_peft: true
+trust_remote_code: true
+use_flash_attention_2: true
+
+bf16: true
+do_eval: true
+evaluation_strategy: steps
+eval_steps: 1000
+gradient_accumulation_steps: 4
+gradient_checkpointing: false
+gradient_checkpointing_kwargs:
+  use_reentrant: False
+save_only_model: true
+hub_model_id: meta-llama/Meta-Llama-3.1-8B
+learning_rate: 2.0e-5
+log_level: info
+logging_steps: 10
+lr_scheduler_type: cosine
+# num_train_epochs: 3
+max_steps: 2000
+optim: adamw_torch
+lora_r: 64
+lora_alpha: 128
+lora_target_modules: [q_proj, k_proj, v_proj, o_proj]
+lora_modules_to_save: ["embed_tokens","lm_head"]
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 1
+push_to_hub: false
+save_strategy: "steps"
+save_steps: 500
+save_total_limit: 4
+seed: 42
+warmup_ratio: 0.1
+report_to: wandb
+remove_unused_columns: false
+
+output_dir: ckpt/instruct_lm/llama3_transform_for_31

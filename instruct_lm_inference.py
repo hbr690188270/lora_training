@@ -14,10 +14,10 @@ CUDA_VISIBLE_DEVICES=1 python instruct_lm_inference.py \
     --model=llama31 \
     --adapter_source=none
 
-CUDA_VISIBLE_DEVICES=0 python instruct_lm_inference.py \
+CUDA_VISIBLE_DEVICES=1 python instruct_lm_inference.py \
     --task=ifeval \
     --model=llama31 \
-    --adapter_source=llama3_converted
+    --adapter_source=llama3_converted_rescale
 
 """
 
@@ -73,6 +73,7 @@ def set_eval_args():
         [
             "llama3",
             "llama3_converted",
+            "llama3_converted_rescale",
             "llama31",
             "none", # none means we do not load adpaters
         ],
@@ -129,6 +130,9 @@ def main(argv):
         if FLAGS.adapter_source == "llama3_converted":
             adapter_dir = "ckpt/instruct_lm/llama3_for_llama31/"
             print("use the updated lora version")
+        elif FLAGS.adapter_source == "llama3_converted_rescale":
+            adapter_dir = "ckpt/instruct_lm/llama3_for_llama31_rescale/"
+            print("use the updated and rescaled lora version")
         else:
             # adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/"
             # adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/checkpoint-6000"

@@ -1,8 +1,13 @@
 """
-CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
-CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_ddp_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
-CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_zero3_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
-CUDA_VISIBLE_DEVICES=1,2,3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a6000_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config_v2.yaml
+The trainer to train a small transformation matrix for LoRA adapters
+
+CUDA_VISIBLE_DEVICES=1,2,3,4 ACCELERATE_LOG_LEVEL=info accelerate launch \
+    --main_process_port 29504 --config_file configs/a6000_config.yaml \
+    instruct_lm_trainer.py configs/instruct_lm_llama3/lora_transform.yaml
+
+CUDA_VISIBLE_DEVICES=5,6 ACCELERATE_LOG_LEVEL=info accelerate launch \
+    --main_process_port 29504 --config_file configs/a6000_config.yaml \
+    instruct_lm_trainer.py configs/instruct_lm_llama3/lora_transform.yaml
 """
 
 import logging
@@ -12,7 +17,7 @@ import accelerate
 import numpy as np
 import torch
 import transformers
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
 import datasets
@@ -29,9 +34,14 @@ from src.data_utils import (
 from src.experiments.instruct_lm.input_preprocess import (
     instruct_lm_preprocessor,
 )
+from src.experiments.lora_transform.lora_transform_model import (
+    TransformLoraModel,
+)
 
 logger = logging.getLogger(__name__)
 
+# SOURCE_LORA_PATH="ckpt/instruct_lm/llama3_for_llama31"
+SOURCE_LORA_PATH="ckpt/instruct_lm/llama31_alpha128_r64"
 
 def main():
     parser = MyArgumentParser((ModelArguments, DataArguments, SFTConfig))
@@ -111,7 +121,15 @@ def main():
         target_modules=model_args.lora_target_modules,
         modules_to_save=model_args.lora_modules_to_save,
     )
-    model = get_peft_model(model, peft_config)
+
+    # Load the fine-tuned LoRA from LLaMA3
+    model = TransformLoraModel(model, peft_config)
+    model.load_adapter(SOURCE_LORA_PATH)
+    model.requires_grad_(False)
+    for name, param in model.named_parameters():
+        if "transform_matrix" in name:
+            param.requires_grad_(True)
+        # print(name, param.data.requires_grad)
     model.print_trainable_parameters()
 
     np.random.seed(222)
@@ -152,6 +170,11 @@ def main():
 
     accelerator = accelerate.Accelerator()
     trainer = accelerator.prepare(trainer)
+
+    metrics = trainer.evaluate(eval_dataset=test_dataset)
+    metrics["init_eval_samples"] = len(eval_dataset)
+    trainer.log_metrics("init_eval", metrics)
+    trainer.save_metrics("init_eval", metrics)
 
 
     logger.info("*** Train ***")
