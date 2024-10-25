@@ -8,14 +8,13 @@ python tools/ifeval/evaluation_main.py \
 
 python tools/ifeval/evaluation_main.py \
     --input_data=tools/ifeval/data/input_data.jsonl \
-    --input_response_data=generations/ifeval_logs_none_to_llama31.jsonl \
+    --input_response_data=generations/ifeval_logs_llama31_to_llama31.jsonl \
     --output_dir=generations/
 
 python tools/ifeval/evaluation_main.py \
     --input_data=tools/ifeval/data/input_data.jsonl \
-    --input_response_data=generations/ifeval_logs_llama3_converted_rescale_to_llama31.jsonl \
+    --input_response_data=generations/ifeval_logs_llama3_converted_and_absorbed_to_llama31_bsz2.jsonl \
     --output_dir=generations/
-
 """
 
 import collections

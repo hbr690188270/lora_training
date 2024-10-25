@@ -63,6 +63,42 @@ class instruct_lm_preprocessor():
             "labels": labels,
         }
 
+    def process_tulu2(
+        self,
+        example: Dict[str, str],
+    ):
+        """
+        The entry point of the preprocessor for nvidia/Daring-Anteater dataset.
+        """
+        conversation = example["messages"]
+        texts = []
+        roles = []
+        if len(conversation) % 2 != 0:
+            if conversation[0]["role"] == "Assistant":
+                conversation = conversation[1:]
+            elif conversation[-1]["role"] == "User":
+                conversation = conversation[:-1]
+            else:
+                conversation = conversation[:-1]
+        for idx in range(0, len(conversation), 2):
+            if (
+                conversation[idx]["role"] == "User" and
+                conversation[idx + 1]["role"] == "Assistant"
+            ):
+                texts.append(conversation[idx]["content"])
+                texts.append(conversation[idx + 1]["content"])
+                roles += [0, 1]
+            else:
+                print(conversation[idx])
+                print(conversation[idx + 1])
+                raise ValueError()
+
+        input_ids, labels = self.process_single_conversation(texts, roles)
+        return {
+            "input_ids": input_ids,
+            "labels": labels,
+        }
+
     def process_single_conversation(
         self,
         texts: List[str],

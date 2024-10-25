@@ -43,104 +43,10 @@ class Linear(nn.Module, lora_layer.LoraLayer):
             use_dora=use_dora,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.transform_matrix = nn.Linear(r, r, bias=False)
+        self.lora_transform_matrix = nn.ModuleDict({})
+        self.lora_transform_matrix[adapter_name] = nn.Linear(r, r, bias=False)
         with torch.no_grad():
-            self.transform_matrix.weight.copy_(torch.eye(r))
-
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
-        """
-        Merge the active adapter weights into the base weights
-
-        Args:
-            safe_merge (`bool`, *optional*):
-                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
-                before merging the weights. This is useful if you want to check if the merge operation will produce
-                NaNs. Defaults to `False`.
-            adapter_names (`list[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
-        """
-        adapter_names = check_adapters_to_merge(self, adapter_names)
-        if not adapter_names:
-            # no adapter to merge
-            return
-
-        for active_adapter in adapter_names:
-            if active_adapter in self.lora_A.keys():
-                base_layer = self.get_base_layer()
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
-                    orig_weights = base_layer.weight.data.clone()
-                    delta_weight = self.get_delta_weight(active_adapter)
-                    if not self.use_dora[active_adapter]:
-                        orig_weights += delta_weight
-                    else:
-                        # handle dora
-                        # since delta_weight already includes scaling, set it to 1 here
-                        weight_norm = (
-                            self.lora_magnitude_vector[active_adapter]
-                            .get_weight_norm(orig_weights, transpose(delta_weight, self.fan_in_fan_out), scaling=1)
-                            .detach()
-                        )
-                        # We need to cache weight_norm because it has to be based on the original weights. We
-                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
-                        # different value
-                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
-                        dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                        dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
-                        orig_weights = dora_factor * (orig_weights + delta_weight)
-
-                    if not torch.isfinite(orig_weights).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-
-                    base_layer.weight.data = orig_weights
-                else:
-                    delta_weight = self.get_delta_weight(active_adapter)
-                    if not self.use_dora[active_adapter]:
-                        base_layer.weight.data += delta_weight
-                    else:
-                        # handle dora
-                        # since delta_weight already includes scaling, set it to 1 here
-                        weight_norm = (
-                            self.lora_magnitude_vector[active_adapter]
-                            .get_weight_norm(
-                                base_layer.weight, transpose(delta_weight, self.fan_in_fan_out), scaling=1
-                            )
-                            .detach()
-                        )
-                        # We need to cache weight_norm because it has to be based on the original weights. We
-                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
-                        # different value
-                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
-                        dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                        dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
-                        new_weight = dora_factor * (base_layer.weight.data + delta_weight)
-                        base_layer.weight.data = new_weight
-
-                self.merged_adapters.append(active_adapter)
-
-    def unmerge(self) -> None:
-        """
-        This method unmerges all merged adapter layers from the base weights.
-        """
-        if not self.merged:
-            warnings.warn("Already unmerged. Nothing to do.")
-            return
-        while len(self.merged_adapters) > 0:
-            active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.lora_A.keys():
-                weight = self.get_base_layer().weight
-                delta_weight = self.get_delta_weight(active_adapter)
-                if not self.use_dora[active_adapter]:
-                    weight.data -= delta_weight
-                else:
-                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
-                    dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
-                    weight_orig = weight.data / dora_factor.view(-1, 1) - delta_weight
-                    weight.data = weight_orig
+            self.lora_transform_matrix[adapter_name].weight.copy_(torch.eye(r))
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -160,7 +66,7 @@ class Linear(nn.Module, lora_layer.LoraLayer):
 
         weight_A = self.lora_A[adapter].weight
         weight_B = self.lora_B[adapter].weight
-        tranform_weight = self.transform_matrix.weight
+        tranform_weight = self.lora_transform_matrix[adapter].weight
 
         if cast_to_fp32:
             weight_A = weight_A.float()
@@ -179,7 +85,7 @@ class Linear(nn.Module, lora_layer.LoraLayer):
             # cast back the weights
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
-            self.transform_matrix.weight.data = transpose.to(dtype)
+            self.lora_transform_matrix[adapter].weight.data = tranform_weight.to(dtype)
 
         return output_tensor
 
@@ -209,7 +115,137 @@ class Linear(nn.Module, lora_layer.LoraLayer):
 
                 if not self.use_dora[active_adapter]:
                     # Apply the transformation matrix
-                    result = result + lora_B(self.transform_matrix(lora_A(dropout(x)))) * scaling
+                    result = result + lora_B(
+                        self.lora_transform_matrix[active_adapter](lora_A(dropout(x)))
+                    ) * scaling
+                else:
+                    raise NotImplementedError()
+            result = result.to(torch_result_dtype)
+
+        return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora." + rep
+
+class PQBALinear(nn.Module, lora_layer.LoraLayer):
+    # Lora implemented in a dense layer
+    def __init__(
+        self,
+        base_layer,
+        adapter_name: str,
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        is_target_conv_1d_layer: bool = False,
+        init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
+        use_dora: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        lora_layer.LoraLayer.__init__(self, base_layer, **kwargs)
+        self.fan_in_fan_out = fan_in_fan_out
+
+        self._active_adapter = adapter_name
+        self.update_layer(
+            adapter_name,
+            r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            init_lora_weights=init_lora_weights,
+            use_rslora=use_rslora,
+            use_dora=use_dora,
+        )
+        self.is_target_conv_1d_layer = is_target_conv_1d_layer
+        self.lora_transform_matrix_p = nn.ModuleDict({})
+        self.lora_transform_matrix_q = nn.ModuleDict({})
+        self.lora_transform_matrix_p[adapter_name] = nn.Linear(self.out_features, r, bias=False)
+        self.lora_transform_matrix_q[adapter_name] = nn.Linear(r, self.out_features, bias=False)
+
+    def get_delta_weight(self, adapter) -> torch.Tensor:
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        device = self.lora_B[adapter].weight.device
+        dtype = self.lora_B[adapter].weight.dtype
+
+        # In case users wants to merge the adapter weights that are in
+        # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        weight_A = self.lora_A[adapter].weight
+        weight_B = self.lora_B[adapter].weight
+        transform_weight_p = self.lora_transform_matrix_p[adapter].weight
+        transform_weight_q = self.lora_transform_matrix_q[adapter].weight
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+            transform_weight_p = transform_weight_p.float()
+            transform_weight_q = transform_weight_q.float()
+
+        # Apply transformation matrix
+        # output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        lora_delta = weight_B @ weight_A
+        q_lora_delta = transform_weight_q @ lora_delta
+        pq_lora_delta = transform_weight_p @ q_lora_delta
+
+        output_tensor = transpose(
+            pq_lora_delta, self.fan_in_fan_out
+        ) * self.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+            # cast back the weights
+            self.lora_A[adapter].weight.data = weight_A.to(dtype)
+            self.lora_B[adapter].weight.data = weight_B.to(dtype)
+            self.lora_transform_matrix_p[adapter].weight.data = transform_weight_p.to(dtype)
+            self.lora_transform_matrix_q[adapter].weight.data = transform_weight_q.to(dtype)
+
+        return output_tensor
+
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
+
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            result = self.base_layer(x, *args, **kwargs)
+        elif adapter_names is not None:
+            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+        elif self.merged:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            result = self.base_layer(x, *args, **kwargs)
+            torch_result_dtype = result.dtype
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A.keys():
+                    continue
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+                x = x.to(lora_A.weight.dtype)
+
+                if not self.use_dora[active_adapter]:
+                    # Apply the transformation matrix
+                    lora_change = lora_B(lora_A(dropout(x)))
+                    transformed_change = torch.matmul(
+                        self.lora_transform_matrix_p[active_adapter],
+                        torch.matmul(
+                            self.lora_transform_matrix_q[active_adapter], lora_change
+                        )
+                    )
+                    result = result + transformed_change * scaling
                 else:
                     raise NotImplementedError()
             result = result.to(torch_result_dtype)
@@ -251,7 +287,13 @@ def dispatch_transform_lora(
             )
             kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
         kwargs.update(lora_config.loftq_config)
-        new_module = Linear(target, adapter_name, **kwargs)
+        transform_type = kwargs.pop("transform_type")
+        if transform_type == "BTA":
+            new_module = Linear(target, adapter_name, **kwargs)
+        elif transform_type == "PQBA":
+            new_module = PQBALinear(target, adapter_name, **kwargs)
+        else:
+            raise NotImplementedError()
     elif isinstance(target_base_layer, Conv1D):
         if not kwargs["fan_in_fan_out"]:
             warnings.warn(
@@ -272,9 +314,11 @@ class LoraWithTransform(LoraModel):
         model,
         config,
         adapter_name,
-        low_cpu_mem_usage = False
+        low_cpu_mem_usage = False,
+        transform_type: str = "BTA",
     ):
         super().__init__(model, config, adapter_name, low_cpu_mem_usage)
+        self.transform_type = transform_type
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
@@ -284,7 +328,13 @@ class LoraWithTransform(LoraModel):
 
         new_module = None
         for dispatcher in dispatchers:
-            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
+            new_module = dispatcher(
+                target,
+                adapter_name,
+                lora_config=lora_config,
+                transform_type=kwargs["transform_type"],
+                **kwargs
+            )
             if new_module is not None:  # first match wins
                 break
 
@@ -326,6 +376,7 @@ class LoraWithTransform(LoraModel):
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "transform_type": self.transform_type,
         }
 
         # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
@@ -343,7 +394,12 @@ class LoraWithTransform(LoraModel):
             #     use_dora=lora_config.use_dora,
             # )
         else:
-            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            new_module = self._create_new_module(
+                lora_config,
+                adapter_name,
+                target,
+                **kwargs
+            )
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)

@@ -5,11 +5,11 @@ CUDA_VISIBLE_DEVICES=4 python eval.py \
     --adapter_source=llama3 \
     --apply_chat_template
 
-CUDA_VISIBLE_DEVICES=4 python eval.py \
+CUDA_VISIBLE_DEVICES=0 python eval.py \
     --task=dream_read_the_following_conversation_and_answer_the_question \
     --model=llama31 \
     --adapter_source=llama3 \
-    --adapter_path=ckpt/permuted/dream_read_the_following_conversation_and_answer_the_question/llama3/layer0-9/ \
+    --adapter_path=ckpt/llama3/dream_absorb_transform \
     --apply_chat_template
 
 CUDA_VISIBLE_DEVICES=0 python eval.py \
@@ -42,7 +42,6 @@ from src.data_utils import (
     get_tokenizer,
     load_taskdataset,
 )
-from src.permute_utils import permute_llama_layer
 
 logger = logging.getLogger(__name__)
 
@@ -168,8 +167,6 @@ def main(argv):
     elif FLAGS.adapter_path is not None:
         adapter_dir = FLAGS.adapter_path
         model = PeftModel.from_pretrained(model, adapter_dir)
-        model.merge_and_unload(progressbar=True)
-        model = model.model
         # model.load_adapter(adapter_dir, adapter_name = "sft")
         # model.set_adapter(["sft"])
 
@@ -204,8 +201,8 @@ def main(argv):
     all_loss = []
     with torch.no_grad():
         for batch in tqdm.tqdm(eval_dataloader):
-            print(batch.keys())
-            pause = input("???")
+            # print(batch.keys())
+            # pause = input("???")
             batch = move_to_target_device(batch, device)
             outputs = model(**batch)
             loss = outputs.loss

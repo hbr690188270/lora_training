@@ -226,6 +226,10 @@ class ModelArguments:
         default="none",
         metadata={"help": "the abbreviation of the model to be trained/evaluated."}
     )
+    lora_transform_type: str = field(
+        default="BTA",
+        metadata={"help": "choose from `BTA`, `PQBA`"},
+    )
 
 
     def __post_init__(self):
@@ -238,7 +242,10 @@ class DataArguments:
     """
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
-
+    dataset_name: Optional[str] = field(
+        default="Daring-Anteater",
+        metadata={"help": "name of the dataset."},
+    )
     chat_template: Optional[str] = field(default=None, metadata={"help": "The chat template to use."})
     dataset_mixer: Optional[Dict[str, float]] = field(
         default=None,

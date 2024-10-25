@@ -23,6 +23,9 @@ def get_tokenizer(
     if "llama3-8b-instruct" in model_name_or_path or "llama3_1-8b-instruct" in model_name_or_path:
         tokenizer.pad_token = "<|finetune_right_pad_id|>"
         tokenizer.pad_token_id = 128004
+    elif "llama3-8b" in model_name_or_path or "llama3_1-8b" in model_name_or_path:
+        tokenizer.pad_token = "<|finetune_right_pad_id|>"
+        tokenizer.pad_token_id = 128004
     elif "llama2-7b-chat" in model_name_or_path:
         tokenizer.pad_token = tokenizer.unk_token
         tokenizer.pad_token_id = tokenizer.unk_token_id

@@ -1,17 +1,28 @@
 """
-CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
-CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_ddp_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
-CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_zero3_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
-CUDA_VISIBLE_DEVICES=1,2,3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a6000_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config_v2.yaml
+Trainer for LoRA fine-tuning on pre-training evaluation tasks, such as GSM8K, ARC, and Sciq.
+To view all available configs, run:
+
+```
+import src.experiments.pretrain_tasks.pretrain_task_trainer as sp
+configs = sp.named_trainer_configs()
+print(configs)
+```
+
+CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info \
+    accelerate launch --main_process_port 29504 --config_file configs/a100_ddp_config.yaml \
+    src/experiments/pretrain_tasks/pretrain_task_trainer.py \
+    --config_name="ptr-llama3-8b-arc_challenge"
+
 """
 
 import logging
+import os
 import sys
 
-import accelerate
 import numpy as np
 import torch
 import transformers
+from absl import app, flags
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
@@ -19,7 +30,6 @@ import datasets
 from src.cmd_parser import (
     DataArguments,
     ModelArguments,
-    MyArgumentParser,
     SFTConfig,
 )
 from src.data_utils import (
@@ -32,10 +42,83 @@ from src.experiments.instruct_lm.input_preprocess import (
 
 logger = logging.getLogger(__name__)
 
+FLAGS = flags.FLAGS
 
-def main():
-    parser = MyArgumentParser((ModelArguments, DataArguments, SFTConfig))
-    model_args, data_args, training_args = parser.parse()
+def set_flags():
+    flags.DEFINE_string(
+        "config_name",
+        None,
+        help="Name of the trainer config. Must be defined in `named_trainer_configs()` function",
+    )
+
+
+def load_pretraining_tasks_configs():
+    trainer_configs = {}
+    for model_path in ["model_cache/llama3-8b", "model_cache/llama3_1-8b"]:
+        model_name_for_shot = os.path.basename(model_path)
+        for taskname in ["arc_challenge", "arc_easy", "gsm8k"]:
+            model_args = ModelArguments(
+                model_name_or_path=model_path,
+                model_name_for_short="llama3-8b",
+                torch_dtype=torch.bfloat16,
+                use_peft=True,
+                trust_remote_code=True,
+                use_flash_attention_2=True,
+                lora_r=64,
+                lora_alpha=128,
+                lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+                lora_modules_to_save=None,
+            )
+            data_args = DataArguments(
+                dataset_name=taskname,
+            )
+            sft_training_args = SFTConfig(
+                max_seq_length=768,
+                per_device_train_batch_size=2,
+                per_device_eval_batch_size=2,
+                gradient_accumulation_steps=2,
+                num_train_epochs=3,
+                learning_rate=2.0e-5,
+                optim="adamw_torch",
+                lr_scheduler_type="cosine",
+                do_eval=True,
+                bf16=True,
+                output_dir=f"ckpt/ptr/{model_name_for_shot}-{taskname}/",
+                save_only_model=True,
+                save_strategy="steps",
+                save_steps=2000,
+                save_total_limit=4,
+                remove_unused_columns=False,
+                report_to="wandb",
+                run_name=f"ptr-{model_name_for_shot}-{taskname}",
+                warmup_ratio=0.1,
+                seed=42,
+                push_to_hub=False,
+                logging_steps=10,
+                log_level="info",
+                gradient_checkpointing=False,
+            )
+
+            cfg_name = f"ptr-{model_name_for_shot}-{taskname}"
+            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
+
+    return trainer_configs
+
+def named_trainer_configs():
+    trainer_configs = {}
+    pretraining_configs = load_pretraining_tasks_configs()
+    trainer_configs.update(pretraining_configs)
+    return trainer_configs
+
+def main(argv):
+    trainer_configs = named_trainer_configs()
+    config_name = FLAGS.config_name
+    if config_name not in trainer_configs:
+        print(f"Found unrecognized config name `{config_name}`")
+        print(f"Do you mean {list(trainer_configs.keys())}?")
+        raise ValueError()
+
+    model_args, data_args, training_args = trainer_configs[config_name]
 
     # Set seed for reproducibility
     set_seed(training_args.seed)
@@ -80,11 +163,20 @@ def main():
         tokenizer=tokenizer,
     )
 
-    dataset = datasets.load_dataset("nvidia/Daring-Anteater", split="train")
+    if data_args.dataset_name == "Daring-Anteater":
+        dataset = datasets.load_dataset("nvidia/Daring-Anteater", split="train")
+        preprocess_fn = preprocessor.process_daring_anteater
+        remove_columns=["system", "mask", "dataset", "conversations"],
+    elif data_args.dataset_name == "tulu2":
+        dataset = datasets.load_dataset("allenai/tulu-v2-sft-mixture", split="train")
+        preprocess_fn = preprocessor.process_tulu2
+        remove_columns=["dataset", "id", "messages",],
+    else:
+        raise NotImplementedError()
     dataset = dataset.map(
-        preprocessor.process_daring_anteater,
+        preprocess_fn,
         num_proc=32,
-        remove_columns=['system', 'mask', 'dataset', 'conversations'],
+        remove_columns=remove_columns,
         batched=False,
     )
 
@@ -98,7 +190,7 @@ def main():
         torch_dtype=torch_dtype,
         use_cache=False if training_args.gradient_checkpointing else True,
         device_map=None,
-        cache_dir='./model_cache'
+        cache_dir="./model_cache"
     )
 
     model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
@@ -138,7 +230,10 @@ def main():
     if apply_chat_template:
         output_dir += "_chat"
     training_args.output_dir = output_dir
-    runname = f"llama3-instructlm-alpha{lora_alpha}-r{lora_r}"
+    if "llama3_1" in model_args.model_name_or_path:
+        runname = f"llama31-{data_args.dataset_name}-alpha{lora_alpha}-r{lora_r}"
+    else:
+        runname = f"llama3-{data_args.dataset_name}-alpha{lora_alpha}-r{lora_r}"
     training_args.run_name = runname
 
     trainer = Trainer(
@@ -149,9 +244,6 @@ def main():
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
-
-    accelerator = accelerate.Accelerator()
-    trainer = accelerator.prepare(trainer)
 
 
     logger.info("*** Train ***")
@@ -180,6 +272,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    set_flags()
+    app.run(main)
+
 
 

@@ -14,11 +14,10 @@ CUDA_VISIBLE_DEVICES=1 python instruct_lm_inference.py \
     --model=llama31 \
     --adapter_source=none
 
-CUDA_VISIBLE_DEVICES=1 python instruct_lm_inference.py \
+CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
     --task=ifeval \
     --model=llama31 \
-    --adapter_source=llama3_converted_rescale
-
+    --adapter_source=llama3_converted_and_absorbed
 """
 
 import json
@@ -28,7 +27,7 @@ import torch
 import tqdm
 import transformers
 from absl import app, flags
-from peft import PeftModel
+from peft import LoraConfig, PeftModel
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
 import datasets
@@ -39,6 +38,9 @@ from src.data_utils import (
 from src.experiments.instruct_lm.input_preprocess import (
     EOT_TOKEN,
 )
+from src.experiments.lora_transform.lora_transform_model import (
+    TransformLoraModel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,17 @@ MODEL_NAME_CONVERTER = {
     "llama3": "model_cache/llama3-8b",
     "llama31": "model_cache/llama3_1-8b",
 }
+ADAPTER_PATH_CONVERTER = {
+    "llama3": "ckpt/instruct_lm/llama3_alpha128_r64",
+    "llama31": "ckpt/instruct_lm/llama31_alpha128_r64/checkpoint-16797",
+    "llama3_converted": "ckpt/instruct_lm/llama3_for_llama31",
+    "llama3_identity_transform": "ckpt/instruct_lm/llama3_alpha128_r64",
+    "llama3_converted_and_identity_transform": "ckpt/instruct_lm/llama3_for_llama31",
+    "llama31_identity_transform": "ckpt/instruct_lm/llama31_alpha128_r64/checkpoint-16797",
+    "llama3_converted_and_trained_transform": "ckpt/instruct_lm/llama3_transform_for_31_alpha128_r64",
+    "llama3_converted_and_absorbed": "ckpt/instruct_lm/llama3_transform_for_31_absorbed",
+}
+
 FLAGS = flags.FLAGS
 
 def set_eval_args():
@@ -75,6 +88,11 @@ def set_eval_args():
             "llama3_converted",
             "llama3_converted_rescale",
             "llama31",
+            "llama3_identity_transform",
+            "llama3_converted_and_identity_transform",
+            "llama31_identity_transform",
+            "llama3_converted_and_trained_transform",
+            "llama3_converted_and_absorbed",
             "none", # none means we do not load adpaters
         ],
         help="which model's adapter to load. None means do not load any adapters",
@@ -127,21 +145,17 @@ def main(argv):
     model = model.to(device)
 
     if FLAGS.adapter_source != "none":
-        if FLAGS.adapter_source == "llama3_converted":
-            adapter_dir = "ckpt/instruct_lm/llama3_for_llama31/"
-            print("use the updated lora version")
-        elif FLAGS.adapter_source == "llama3_converted_rescale":
-            adapter_dir = "ckpt/instruct_lm/llama3_for_llama31_rescale/"
-            print("use the updated and rescaled lora version")
+        adapter_dir = ADAPTER_PATH_CONVERTER[FLAGS.adapter_source]
+        assert adapter_dir is not None
+
+        if "transform" in FLAGS.adapter_source:
+            peft_config = LoraConfig.from_pretrained(
+                adapter_dir,
+            )
+            model = TransformLoraModel(model, peft_config)
+            model.load_adapter(adapter_dir, "default")
         else:
-            # adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/"
-            # adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/checkpoint-6000"
-            adapter_dir = f"ckpt/instruct_lm/{FLAGS.adapter_source}_alpha128_r64/checkpoint-16797"
-        # model.load_adapter(adapter_dir, adapter_name = "sft")
-        # model.set_adapter(["sft"])
-        model: LlamaForCausalLM = PeftModel.from_pretrained(model, adapter_dir)
-        # model.merge_and_unload(progressbar=True)
-        # model = model.model
+            model = PeftModel.from_pretrained(model, adapter_dir)
 
     model.eval()
 
@@ -157,7 +171,7 @@ def main(argv):
         eos_token_id=tokenizer.pad_token_id,
     )
 
-    batch_size = 2
+    batch_size = 4
     all_batches = []
     curr_batch = []
     for idx in range(len(prompt_tokens_ids)):
@@ -213,7 +227,7 @@ def main(argv):
                 generation_logs.append(log)
                 global_index += 1
 
-    with open(f"generations/ifeval_logs_{FLAGS.adapter_source}_to_{FLAGS.model}.jsonl", "w") as f:
+    with open(f"generations/ifeval_logs_{FLAGS.adapter_source}_to_{FLAGS.model}_bsz{batch_size}.jsonl", "w") as f:
         for log in generation_logs:
             f.write(json.dumps(log) + "\n")
 

@@ -1,27 +1,17 @@
 """
-The trainer to train a small transformation matrix for LoRA adapters
-
-CUDA_VISIBLE_DEVICES=1,2,3,4 ACCELERATE_LOG_LEVEL=info accelerate launch \
-    --main_process_port 29504 \
-    --config_file configs/a6000_config.yaml \
-    src/experiments/lora_transform/lora_transform_trainer.py \
-    configs/instruct_lm_llama3/lora_transform.yaml
-
-CUDA_VISIBLE_DEVICES=5,6 ACCELERATE_LOG_LEVEL=info accelerate launch \
-    --main_process_port 29504 \
-    --config_file configs/a6000_config.yaml \
-    src/experiments/lora_transform/lora_transform_trainer.py \
-    configs/instruct_lm_llama3/lora_transform.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_ddp_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a100_zero3_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config.yaml
+CUDA_VISIBLE_DEVICES=1,2,3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch --main_process_port 29504 --config_file configs/a6000_config.yaml instruct_lm_trainer.py configs/instruct_lm_llama3/config_v2.yaml
 """
 
 import logging
 import sys
 
-import accelerate
 import numpy as np
 import torch
 import transformers
-from peft import LoraConfig
+from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
 import datasets
@@ -38,15 +28,9 @@ from src.data_utils import (
 from src.experiments.instruct_lm.input_preprocess import (
     instruct_lm_preprocessor,
 )
-from src.experiments.lora_transform.lora_transform_model import (
-    PQBALoraModel,
-    TransformLoraModel,
-)
 
 logger = logging.getLogger(__name__)
 
-SOURCE_LORA_PATH="ckpt/instruct_lm/llama3_for_llama31"
-# SOURCE_LORA_PATH="ckpt/instruct_lm/llama31_alpha128_r64/checkpoint-16797"
 
 def main():
     parser = MyArgumentParser((ModelArguments, DataArguments, SFTConfig))
@@ -95,11 +79,20 @@ def main():
         tokenizer=tokenizer,
     )
 
-    dataset = datasets.load_dataset("nvidia/Daring-Anteater", split="train")
+    if data_args.dataset_name == "Daring-Anteater":
+        dataset = datasets.load_dataset("nvidia/Daring-Anteater", split="train")
+        preprocess_fn = preprocessor.process_daring_anteater
+        remove_columns=["system", "mask", "dataset", "conversations"],
+    elif data_args.dataset_name == "tulu2":
+        dataset = datasets.load_dataset("allenai/tulu-v2-sft-mixture", split="train")
+        preprocess_fn = preprocessor.process_tulu2
+        remove_columns=["dataset", "id", "messages",],
+    else:
+        raise NotImplementedError()
     dataset = dataset.map(
-        preprocessor.process_daring_anteater,
+        preprocess_fn,
         num_proc=32,
-        remove_columns=['system', 'mask', 'dataset', 'conversations'],
+        remove_columns=remove_columns,
         batched=False,
     )
 
@@ -113,7 +106,7 @@ def main():
         torch_dtype=torch_dtype,
         use_cache=False if training_args.gradient_checkpointing else True,
         device_map=None,
-        cache_dir='./model_cache'
+        cache_dir="./model_cache"
     )
 
     model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
@@ -126,20 +119,7 @@ def main():
         target_modules=model_args.lora_target_modules,
         modules_to_save=model_args.lora_modules_to_save,
     )
-
-    # Load the fine-tuned LoRA from LLaMA3
-    if model_args.lora_transform_type == "BTA":
-        model = TransformLoraModel(model, peft_config)
-    elif model_args.lora_transform_type == "PQBA":
-        model = PQBALoraModel(model, peft_config)
-    else:
-        raise NotImplementedError()
-    model.load_adapter(SOURCE_LORA_PATH, "default")
-    model.requires_grad_(False)
-    for name, param in model.named_parameters():
-        if "transform_matrix" in name:
-            param.requires_grad_(True)
-        # print(name, param.data.requires_grad)
+    model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
     np.random.seed(222)
@@ -167,9 +147,9 @@ def main():
         output_dir += "_chat"
     training_args.output_dir = output_dir
     if "llama3_1" in model_args.model_name_or_path:
-        runname = f"llama31-lora-transform-alpha{lora_alpha}-r{lora_r}"
+        runname = f"llama31-{data_args.dataset_name}-alpha{lora_alpha}-r{lora_r}"
     else:
-        runname = f"llama3-lora-transform-alpha{lora_alpha}-r{lora_r}"
+        runname = f"llama3-{data_args.dataset_name}-alpha{lora_alpha}-r{lora_r}"
     training_args.run_name = runname
 
     trainer = Trainer(
@@ -181,8 +161,8 @@ def main():
         data_collator=data_collator,
     )
 
-    accelerator = accelerate.Accelerator()
-    trainer = accelerator.prepare(trainer)
+    # accelerator = accelerate.Accelerator()
+    # trainer = accelerator.prepare(trainer)
 
 
     logger.info("*** Train ***")
@@ -194,6 +174,9 @@ def main():
     trainer.save_metrics("train", metrics)
     trainer.save_state()
 
+    ##################################
+    # Save model and create model card
+    ##################################
     logger.info("*** Save model ***")
     trainer.save_model(training_args.output_dir)
     logger.info(f"Model saved to {training_args.output_dir}")
