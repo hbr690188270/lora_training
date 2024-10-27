@@ -10,3 +10,5 @@ wandb/
 
 test.py
 generations/
+launch_scripts/
+logs/

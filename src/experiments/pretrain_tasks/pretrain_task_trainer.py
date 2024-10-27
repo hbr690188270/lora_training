@@ -8,8 +8,8 @@ configs = sp.named_trainer_configs()
 print(configs)
 ```
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info \
-    accelerate launch --main_process_port 29504 --config_file configs/a100_ddp_config.yaml \
+CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info \
+    accelerate launch --main_process_port 29504 --config_file configs/a6000_config.yaml \
     src/experiments/pretrain_tasks/pretrain_task_trainer.py \
     --config_name="ptr-llama3-8b-arc_challenge"
 
@@ -18,6 +18,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info \
 import logging
 import os
 import sys
+from collections import defaultdict
 
 import numpy as np
 import torch
@@ -34,10 +35,10 @@ from src.cmd_parser import (
 )
 from src.data_utils import (
     DataCollatorForInstructLM,
-    get_instruct_lm_tokenizer,
+    get_tokenizer,
 )
-from src.experiments.instruct_lm.input_preprocess import (
-    instruct_lm_preprocessor,
+from src.experiments.pretrain_tasks.input_preprocess import (
+    pretraining_task_preprocessor,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,12 +52,24 @@ def set_flags():
         help="Name of the trainer config. Must be defined in `named_trainer_configs()` function",
     )
 
+DATASET_TO_TRAIN_EPOCHS = defaultdict(lambda: 3)
+DATASET_TO_TRAIN_EPOCHS.update(
+    {
+        "arc": 3,
+        "arc_challenge": 3,
+        "arc_easy": 3,
+        "gsm8k": 3,
+        "hellaswag": 1,
+    }
+)
 
 def load_pretraining_tasks_configs():
     trainer_configs = {}
     for model_path in ["model_cache/llama3-8b", "model_cache/llama3_1-8b"]:
         model_name_for_shot = os.path.basename(model_path)
-        for taskname in ["arc_challenge", "arc_easy", "gsm8k"]:
+        for taskname in [
+            "arc", "arc_challenge", "arc_easy", "gsm8k", "hellaswag", "winogrande", "piqa"
+        ]:
             model_args = ModelArguments(
                 model_name_or_path=model_path,
                 model_name_for_short="llama3-8b",
@@ -72,11 +85,24 @@ def load_pretraining_tasks_configs():
             data_args = DataArguments(
                 dataset_name=taskname,
             )
+
+            if taskname == "gsm8k":
+                max_seq_length = 2048
+                per_device_train_batch_size = 2
+                per_device_eval_batch_size = 2
+            elif taskname in [
+                "arc_challenge", "arc_easy", "arc", "hellaswag", "winogrande", "piqa"
+            ]:
+                max_seq_length = 768
+                per_device_train_batch_size = 4
+                per_device_eval_batch_size = 4
+            else:
+                raise ValueError(f"Unrecognized task {taskname}")
             sft_training_args = SFTConfig(
-                max_seq_length=768,
-                per_device_train_batch_size=2,
-                per_device_eval_batch_size=2,
-                gradient_accumulation_steps=2,
+                max_seq_length=max_seq_length,
+                per_device_train_batch_size=per_device_train_batch_size,
+                per_device_eval_batch_size=per_device_eval_batch_size,
+                gradient_accumulation_steps=4,
                 num_train_epochs=3,
                 learning_rate=2.0e-5,
                 optim="adamw_torch",
@@ -146,33 +172,61 @@ def main(argv):
     logger.info(f"Model parameters {model_args}")
     logger.info(f"Data parameters {data_args}")
     logger.info(f"Training/evaluation parameters {training_args}")
+    logger.info(f"Config name: {config_name}")
 
-    apply_chat_template = training_args.apply_chat_template
-
-    tokenizer = get_instruct_lm_tokenizer(
+    tokenizer = get_tokenizer(
         model_args.model_name_or_path,
     )
-    preprocessor = instruct_lm_preprocessor(
+    preprocessor = pretraining_task_preprocessor(
         tokenizer=tokenizer,
-        max_len=2048,
-        eot_id=128002,
-        prepend_eos=False,
+        max_len=training_args.max_seq_length,
     )
 
     data_collator = DataCollatorForInstructLM(
         tokenizer=tokenizer,
     )
 
-    if data_args.dataset_name == "Daring-Anteater":
-        dataset = datasets.load_dataset("nvidia/Daring-Anteater", split="train")
-        preprocess_fn = preprocessor.process_daring_anteater
-        remove_columns=["system", "mask", "dataset", "conversations"],
-    elif data_args.dataset_name == "tulu2":
-        dataset = datasets.load_dataset("allenai/tulu-v2-sft-mixture", split="train")
-        preprocess_fn = preprocessor.process_tulu2
-        remove_columns=["dataset", "id", "messages",],
+    if data_args.dataset_name == "gsm8k":
+        dataset = datasets.load_dataset("openai/gsm8k", "main", split="train")
+        preprocess_fn = preprocessor.process_gsm8k
+        remove_columns=["question", "answer"]
+    elif data_args.dataset_name == "arc_challenge":
+        dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
+        preprocess_fn = preprocessor.process_arc
+        remove_columns=["question", "id", "choices", "answerKey"]
+    elif data_args.dataset_name == "arc_easy":
+        dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
+        preprocess_fn = preprocessor.process_arc
+        remove_columns=["question", "id", "choices", "answerKey"]
+    elif data_args.dataset_name == "arc":
+        arc_challenge = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
+        arc_easy = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
+        dataset = datasets.concatenate_datasets([arc_challenge, arc_easy],)
+        preprocess_fn = preprocessor.process_arc
+        remove_columns=["question", "id", "choices", "answerKey"]
+    elif data_args.dataset_name == "hellaswag":
+        dataset = datasets.load_dataset("Rowan/hellaswag",   split="train")
+        preprocess_fn = preprocessor.process_hellaswag
+        remove_columns=[
+            "ind", "activity_label", "ctx_a", "ctx_b",
+            "ctx", "endings", "split", "split_type", "label"
+        ]
+    elif data_args.dataset_name == "piqa":
+        dataset = datasets.load_dataset("ybisk/piqa",   split="train", trust_remote_code=True)
+        preprocess_fn = preprocessor.process_piqa
+        remove_columns=["label", "goal", "sol1", "sol2"]
+    elif data_args.dataset_name == "winogrande":
+        dataset = datasets.load_dataset(
+            "allenai/winogrande",
+            "winogrande_xl",
+            split="train",
+            trust_remote_code=True
+        )
+        preprocess_fn = preprocessor.process_winogrand
+        remove_columns=["sentence", "option1", "option2", "answer"]
     else:
         raise NotImplementedError()
+
     dataset = dataset.map(
         preprocess_fn,
         num_proc=32,
@@ -221,20 +275,6 @@ def main(argv):
     print(train_dataset)
     print(eval_dataset)
     print(test_dataset)
-
-    output_dir = training_args.output_dir
-    lora_alpha = model_args.lora_alpha
-    lora_r = model_args.lora_r
-    if lora_alpha != 4 or lora_r != 16:
-        output_dir += f"_alpha{lora_alpha}_r{lora_r}"
-    if apply_chat_template:
-        output_dir += "_chat"
-    training_args.output_dir = output_dir
-    if "llama3_1" in model_args.model_name_or_path:
-        runname = f"llama31-{data_args.dataset_name}-alpha{lora_alpha}-r{lora_r}"
-    else:
-        runname = f"llama3-{data_args.dataset_name}-alpha{lora_alpha}-r{lora_r}"
-    training_args.run_name = runname
 
     trainer = Trainer(
         model=model,
