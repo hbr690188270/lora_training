@@ -82,6 +82,7 @@ class pretraining_processor_test(absltest.TestCase):
     def tokenizer(self,):
         tokenizer = AutoTokenizer.from_pretrained(
             "model_cache/llama3-8b",
+            # "model_cache/mistral-7b-instruct-v3",
         )
         return tokenizer
 

@@ -6,15 +6,18 @@ launch_lm_lora_eval() {
     MODEL_NAME="${pretrained#model_cache/}"
     echo "$MODEL_NAME"
 
-    echo "evaluating ${pretrained} with LoRA ${peft}"
+    echo "evaluating ${pretrained}"
     accelerate launch -m lm_eval --model hf \
         --model_args "pretrained=${pretrained},dtype=bfloat16" \
         --tasks $TASKS \
         --batch_size 16 \
-        --log_samples \
         --output_path logs/harness_eval/${MODEL_NAME}
 }
 
 # Example usage
-launch_lm_lora_eval "model_cache/llama3-8b" "arc_challenge,arc_easy"
-
+EVAL_TASKS=("arc_challenge" "arc_easy" "gsm8k" "hellaswag" "piqa" "winogrande")
+for EVAL_TASK in ${EVAL_TASKS[@]}
+do
+    launch_lm_lora_eval "model_cache/llama3-8b" "${EVAL_TASK}"
+    launch_lm_lora_eval "model_cache/llama3_1-8b" "${EVAL_TASK}"
+done

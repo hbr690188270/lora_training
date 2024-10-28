@@ -65,7 +65,9 @@ DATASET_TO_TRAIN_EPOCHS.update(
 
 def load_pretraining_tasks_configs():
     trainer_configs = {}
-    for model_path in ["model_cache/llama3-8b", "model_cache/llama3_1-8b"]:
+    for model_path in [
+        "model_cache/llama3-8b", "model_cache/llama3_1-8b", "model_cache/mistral-7b-instruct-v3"
+    ]:
         model_name_for_shot = os.path.basename(model_path)
         for taskname in [
             "arc", "arc_challenge", "arc_easy", "gsm8k", "hellaswag", "winogrande", "piqa"

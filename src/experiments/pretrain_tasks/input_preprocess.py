@@ -39,8 +39,8 @@ class pretraining_task_preprocessor():
         )["input_ids"]
 
         qa_split_token_ids = self.tokenizer(
-            "Answer:", add_special_tokens=False, return_tensors=None
-        )["input_ids"]
+            "\nAnswer:", add_special_tokens=False, return_tensors=None
+        )["input_ids"][1:]
         qa_split_position = [
             i for i in range(len(input_ids) - len(qa_split_token_ids) + 1)
             if input_ids[i:i + len(qa_split_token_ids)] == qa_split_token_ids
