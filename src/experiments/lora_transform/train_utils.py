@@ -16,6 +16,7 @@ DEFAULT_LORA_TRANSFORM_CONFIG = SFTConfig(
     do_eval=True,
     bf16=True,
     output_dir="tmp",
+    eval_strategy="epoch",
     save_only_model=True,
     save_strategy="steps",
     save_steps=2000,
@@ -29,6 +30,8 @@ DEFAULT_LORA_TRANSFORM_CONFIG = SFTConfig(
     logging_steps=10,
     log_level="info",
     gradient_checkpointing=False,
+    eval_on_start=True,
+    label_names=["labels"]
 )
 
 sft_train_config = replace(
