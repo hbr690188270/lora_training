@@ -9,9 +9,9 @@ import sys
 
 import torch
 import transformers
-from alignment import (
-    get_peft_config,
-)
+# from alignment import (
+#     get_peft_config,
+# )
 from peft import get_peft_model
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
@@ -117,7 +117,7 @@ def main():
     )
 
     model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
-    model = get_peft_model(model, get_peft_config(model_args))
+    # model = get_peft_model(model, get_peft_config(model_args))
     # model, tokenizer = setup_chat_format(model, tokenizer)
     model_kwargs = None
     model.print_trainable_parameters()
