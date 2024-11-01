@@ -1,12 +1,8 @@
 """
 python -m tools.update_instruct_lm_lora \
     --adapter_path="ckpt/instruct_lm/llama3_alpha128_r64/checkpoint-16797/adapter_model.safetensors" \
-    --model_name_or_path="model_cache/llama3-8b" \
-    --output_path="ckpt/instruct_lm/llama3_for_llama31/adapter_model.safetensors"
-
-python -m tools.update_instruct_lm_lora \
-    --adapter_path="ckpt/instruct_lm/llama3_alpha128_r64/checkpoint-16797/adapter_model.safetensors" \
-    --model_name_or_path="model_cache/llama3-8b" \
+    --source_model_name_or_path="model_cache/llama3-8b" \
+    --target_model_name_or_path="model_cache/llama3_1-8b" \
     --output_path="ckpt/instruct_lm/llama3_for_llama31/adapter_model.safetensors"
 """
 
@@ -51,7 +47,7 @@ def load_lora_weights():
             tensors[key] = f.get_tensor(key)
     return tensors
 
-def main():
+def main(argv):
     lora_tensors = load_lora_weights()
 
     model_name_or_path = FLAGS.source_model_name_or_path
@@ -71,7 +67,7 @@ def main():
     pretrained_lm_head = model.lm_head.weight.data
 
     llama31_model: LlamaForCausalLM = AutoModelForCausalLM.from_pretrained(
-        FLAGS.target_source_model_name_or_path
+        FLAGS.target_model_name_or_path,
         **model_kwargs
     )
     llama31_embeddings = llama31_model.model.embed_tokens.weight.data

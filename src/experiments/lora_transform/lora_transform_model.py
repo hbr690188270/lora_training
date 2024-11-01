@@ -11,7 +11,8 @@ from peft import (
 from transformers import PreTrainedModel
 
 from src.experiments.lora_transform.lora_with_transform import (
-    LoraWithTransform,
+    LoraWithBTATransform,
+    LoraWithPQBATransform,
 )
 
 
@@ -35,10 +36,14 @@ class TransformLoraModel(PeftModel):
         self._is_prompt_learning = peft_config.is_prompt_learning
 
         self._peft_config = None
-        cls = LoraWithTransform
+        cls = LoraWithBTATransform
         ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
         with ctx():
-            self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
+            self.base_model = cls(
+                model,
+                {adapter_name: peft_config},
+                adapter_name,
+            )
         self.set_additional_trainable_modules(peft_config, adapter_name)
 
         if hasattr(self.base_model, "_cast_adapter_dtype"):
@@ -80,14 +85,13 @@ class PQBALoraModel(PeftModel):
         self._is_prompt_learning = peft_config.is_prompt_learning
 
         self._peft_config = None
-        cls = LoraWithTransform
+        cls = LoraWithPQBATransform
         ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
         with ctx():
             self.base_model = cls(
                 model,
                 {adapter_name: peft_config},
                 adapter_name,
-                transform_type="PQBA",
             )
         self.set_additional_trainable_modules(peft_config, adapter_name)
 

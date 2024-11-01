@@ -29,7 +29,7 @@ def get_tokenizer(
     elif "llama2-7b-chat" in model_name_or_path:
         tokenizer.pad_token = tokenizer.unk_token
         tokenizer.pad_token_id = tokenizer.unk_token_id
-    elif "mistral-7b-instruct-v3" in model_name_or_path:
+    elif "mistral-7b" in model_name_or_path:
         tokenizer.pad_token = tokenizer.unk_token
         tokenizer.pad_token_id = tokenizer.unk_token_id
     else:

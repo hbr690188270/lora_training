@@ -1,41 +1,52 @@
 """
-Trainer for LoRA fine-tuning on pre-training evaluation tasks, such as GSM8K, ARC, and Sciq.
+The trainer to train a small transformation matrix for LoRA adapters
+
 To view all available configs, run:
 
 ```
-import src.experiments.pretrain_tasks.pretrain_task_trainer as sp
-configs = sp.named_trainer_configs()
-print(configs)
+import src.experiments.lora_transform.lora_transform_trainer_v2 as lt
+configs = lt.named_trainer_configs()
+print(configs.keys())
 ```
 
-CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info \
-    accelerate launch --main_process_port 29504 --config_file configs/a6000_config.yaml \
-    src/experiments/pretrain_tasks/pretrain_task_trainer.py \
-    --config_name="ptr-llama3-8b-arc_challenge"
-
+CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch \
+    --main_process_port 29504 \
+    --config_file configs/a6000_config.yaml \
+    src/experiments/lora_transform/lora_transform_trainer_v2.py \
+    --config_name=lora_transform-llama3-8b-mistral-7b-instruct-v3-hellaswag-ptr_default
 """
 
 import logging
 import os
 import sys
-from collections import defaultdict
+from dataclasses import replace
+from typing import Dict, Tuple
 
 import numpy as np
 import torch
 import transformers
 from absl import app, flags
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
 import datasets
 from src.cmd_parser import (
-    DataArguments,
-    ModelArguments,
     SFTConfig,
 )
 from src.data_utils import (
     DataCollatorForInstructLM,
+    get_instruct_lm_tokenizer,
     get_tokenizer,
+)
+from src.experiments.instruct_lm.input_preprocess import (
+    instruct_lm_preprocessor,
+)
+from src.experiments.lora_transform.lora_transform_model import (
+    PQBALoraModel,
+    TransformLoraModel,
+)
+from src.experiments.lora_transform.train_utils import (
+    TRAINING_RECIPE,
 )
 from src.experiments.pretrain_tasks.input_preprocess import (
     pretraining_task_preprocessor,
@@ -52,30 +63,27 @@ def set_flags():
         help="Name of the trainer config. Must be defined in `named_trainer_configs()` function",
     )
 
-DATASET_TO_TRAIN_EPOCHS = defaultdict(lambda: 3)
-DATASET_TO_TRAIN_EPOCHS.update(
-    {
-        "arc": 3,
-        "arc_challenge": 3,
-        "arc_easy": 3,
-        "gsm8k": 3,
-        "hellaswag": 1,
-    }
-)
-
-def load_pretraining_tasks_configs():
-    trainer_configs = {}
-    for model_path in [
-        # "model_cache/llama3-8b", "model_cache/llama3_1-8b", "model_cache/mistral-7b-instruct-v3"
-        "model_cache/llama3-8b", "model_cache/llama3_1-8b", "model_cache/mistral-7b-v3"
+def load_lora_transform_configs():
+    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    for source_model in [
+        "model_cache/llama3-8b",
+        "model_cache/llama3_1-8b",
+        # "model_cache/mistral-7b-instruct-v3",
+        "model_cache/mistral-7b-v3",
     ]:
-        model_name_for_shot = os.path.basename(model_path)
-        for taskname in [
-            "arc", "arc_challenge", "arc_easy", "gsm8k", "hellaswag", "winogrande", "piqa"
+        for target_model in [
+            "model_cache/llama3-8b",
+            "model_cache/llama3_1-8b",
+            # "model_cache/mistral-7b-instruct-v3",
+            "model_cache/mistral-7b-v3",
         ]:
-            model_args = ModelArguments(
-                model_name_or_path=model_path,
-                model_name_for_short="llama3-8b",
+            src_ = os.path.basename(source_model)
+            tgt_ = os.path.basename(target_model)
+            if source_model == target_model:
+                continue
+            model_args = dict(
+                source_model=source_model,
+                target_model=target_model,
                 torch_dtype=torch.bfloat16,
                 use_peft=True,
                 trust_remote_code=True,
@@ -84,60 +92,45 @@ def load_pretraining_tasks_configs():
                 lora_alpha=128,
                 lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
                 lora_modules_to_save=None,
+                lora_transform_type="BTA",
+                lora_dropout=0.05,
             )
-            data_args = DataArguments(
-                dataset_name=taskname,
-            )
-
-            if taskname == "gsm8k":
-                max_seq_length = 2048
-                per_device_train_batch_size = 2
-                per_device_eval_batch_size = 2
-            elif taskname in [
-                "arc_challenge", "arc_easy", "arc", "hellaswag", "winogrande", "piqa"
+            for training_task in [
+                "sft", "arc", "arc_challenge", "arc_easy",
+                "gsm8k", "hellaswag", "winogrande", "piqa"
             ]:
-                max_seq_length = 768
-                per_device_train_batch_size = 4
-                per_device_eval_batch_size = 4
-            else:
-                raise ValueError(f"Unrecognized task {taskname}")
-            sft_training_args = SFTConfig(
-                max_seq_length=max_seq_length,
-                per_device_train_batch_size=per_device_train_batch_size,
-                per_device_eval_batch_size=per_device_eval_batch_size,
-                gradient_accumulation_steps=4,
-                num_train_epochs=3,
-                learning_rate=2.0e-5,
-                optim="adamw_torch",
-                lr_scheduler_type="cosine",
-                do_eval=True,
-                bf16=True,
-                output_dir=f"ckpt/ptr/{model_name_for_shot}-{taskname}/",
-                save_only_model=True,
-                save_strategy="steps",
-                save_steps=2000,
-                save_total_limit=4,
-                remove_unused_columns=False,
-                report_to="wandb",
-                run_name=f"ptr-{model_name_for_shot}-{taskname}",
-                warmup_ratio=0.1,
-                seed=42,
-                push_to_hub=False,
-                logging_steps=10,
-                log_level="info",
-                gradient_checkpointing=False,
-            )
-
-            cfg_name = f"ptr-{model_name_for_shot}-{taskname}"
-            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
-
+                data_args = dict(
+                    training_task=training_task,
+                )
+                if training_task == "sft":
+                    recipe_names = ["sft"]
+                else:
+                    recipe_names = ["ptr_default", "ptr_lr5e-5", "ptr_lr1e-4", "ptr_lr5e-4"]
+                for recipe_name in recipe_names:
+                    sft_training_args = TRAINING_RECIPE[recipe_name]
+                    output_dir = (
+                        f"ckpt/lora_transform/{src_}-{tgt_}-{training_task}-{recipe_name}/"
+                    )
+                    run_name = (
+                        f"ckpt/lora_transform/{src_}-{tgt_}-{training_task}-{recipe_name}/"
+                    )
+                    sft_training_args = replace(
+                        sft_training_args,
+                        output_dir=output_dir,
+                        run_name=run_name,
+                    )
+                    cfg_name = (
+                        f"lora_transform-{src_}-{tgt_}-{training_task}-{recipe_name}"
+                    )
+                    trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
     return trainer_configs
 
 def named_trainer_configs():
-    trainer_configs = {}
-    pretraining_configs = load_pretraining_tasks_configs()
+    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    pretraining_configs = load_lora_transform_configs()
     trainer_configs.update(pretraining_configs)
     return trainer_configs
+
 
 def main(argv):
     trainer_configs = named_trainer_configs()
@@ -149,6 +142,7 @@ def main(argv):
 
     model_args, data_args, training_args = trainer_configs[config_name]
 
+    print(training_args.output_dir)
     # Set seed for reproducibility
     set_seed(training_args.seed)
 
@@ -167,58 +161,58 @@ def main(argv):
     transformers.utils.logging.enable_default_handler()
     transformers.utils.logging.enable_explicit_format()
 
-    # Log on each process a small summary
-    logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f" distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
-    )
-    logger.info(f"Model parameters {model_args}")
-    logger.info(f"Data parameters {data_args}")
-    logger.info(f"Training/evaluation parameters {training_args}")
-    logger.info(f"Config name: {config_name}")
-
-    tokenizer = get_tokenizer(
-        model_args.model_name_or_path,
-    )
-    preprocessor = pretraining_task_preprocessor(
-        tokenizer=tokenizer,
-        max_len=training_args.max_seq_length,
-    )
+    if data_args["training_task"] == "sft":
+        tokenizer = get_instruct_lm_tokenizer(
+            model_args["target_model"],
+        )
+        preprocessor = instruct_lm_preprocessor(
+            tokenizer=tokenizer,
+            max_len=2048,
+            eot_id=128002,
+            prepend_eos=False,
+        )
+    else:
+        tokenizer = get_tokenizer(
+            model_args["target_model"],
+        )
+        preprocessor = pretraining_task_preprocessor(
+            tokenizer=tokenizer,
+            max_len=training_args.max_seq_length,
+        )
 
     data_collator = DataCollatorForInstructLM(
         tokenizer=tokenizer,
     )
-
-    if data_args.dataset_name == "gsm8k":
+    if data_args["training_task"] == "gsm8k":
         dataset = datasets.load_dataset("openai/gsm8k", "main", split="train")
         preprocess_fn = preprocessor.process_gsm8k
         remove_columns=["question", "answer"]
-    elif data_args.dataset_name == "arc_challenge":
+    elif data_args["training_task"] == "arc_challenge":
         dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
         preprocess_fn = preprocessor.process_arc
         remove_columns=["question", "id", "choices", "answerKey"]
-    elif data_args.dataset_name == "arc_easy":
+    elif data_args["training_task"] == "arc_easy":
         dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
         preprocess_fn = preprocessor.process_arc
         remove_columns=["question", "id", "choices", "answerKey"]
-    elif data_args.dataset_name == "arc":
+    elif data_args["training_task"] == "arc":
         arc_challenge = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
         arc_easy = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
         dataset = datasets.concatenate_datasets([arc_challenge, arc_easy],)
         preprocess_fn = preprocessor.process_arc
         remove_columns=["question", "id", "choices", "answerKey"]
-    elif data_args.dataset_name == "hellaswag":
+    elif data_args["training_task"] == "hellaswag":
         dataset = datasets.load_dataset("Rowan/hellaswag",   split="train")
         preprocess_fn = preprocessor.process_hellaswag
         remove_columns=[
             "ind", "activity_label", "ctx_a", "ctx_b",
             "ctx", "endings", "split", "split_type", "label"
         ]
-    elif data_args.dataset_name == "piqa":
+    elif data_args["training_task"] == "piqa":
         dataset = datasets.load_dataset("ybisk/piqa",   split="train", trust_remote_code=True)
         preprocess_fn = preprocessor.process_piqa
         remove_columns=["label", "goal", "sol1", "sol2"]
-    elif data_args.dataset_name == "winogrande":
+    elif data_args["training_task"] == "winogrande":
         dataset = datasets.load_dataset(
             "allenai/winogrande",
             "winogrande_xl",
@@ -227,6 +221,10 @@ def main(argv):
         )
         preprocess_fn = preprocessor.process_winogrand
         remove_columns=["sentence", "option1", "option2", "answer"]
+    elif data_args["training_task"] == "sft":
+        dataset = datasets.load_dataset("nvidia/Daring-Anteater", split="train")
+        preprocess_fn = preprocessor.process_daring_anteater
+        remove_columns=['system', 'mask', 'dataset', 'conversations']
     else:
         raise NotImplementedError()
 
@@ -241,26 +239,51 @@ def main(argv):
 
     torch_dtype = torch.bfloat16
     model_kwargs = dict(
-        revision=model_args.model_revision,
-        trust_remote_code=model_args.trust_remote_code,
-        use_flash_attention_2=model_args.use_flash_attention_2,
+        trust_remote_code=True,
+        use_flash_attention_2=True,
         torch_dtype=torch_dtype,
-        use_cache=False if training_args.gradient_checkpointing else True,
+        use_cache=True,
         device_map=None,
-        cache_dir="./model_cache"
+        cache_dir='./model_cache'
     )
 
-    model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(model_args["target_model"], **model_kwargs)
     peft_config = LoraConfig(
-        r=model_args.lora_r,
-        lora_alpha=model_args.lora_alpha,
-        lora_dropout=model_args.lora_dropout,
+        r=model_args["lora_r"],
+        lora_alpha=model_args["lora_alpha"],
+        lora_dropout=model_args["lora_dropout"],
         bias="none",
         task_type="CAUSAL_LM",
-        target_modules=model_args.lora_target_modules,
-        modules_to_save=model_args.lora_modules_to_save,
+        target_modules=model_args["lora_target_modules"],
+        modules_to_save=model_args["lora_modules_to_save"],
     )
-    model = get_peft_model(model, peft_config)
+
+    # Load the fine-tuned LoRA from LLaMA3
+    if model_args["lora_transform_type"] == "BTA":
+        model = TransformLoraModel(model, peft_config)
+    elif model_args["lora_transform_type"] == "PQBA":
+        model = PQBALoraModel(model, peft_config)
+    else:
+        raise NotImplementedError()
+
+    src_ = os.path.basename(model_args["source_model"])
+    if data_args["training_task"] == "sft":
+        if model_args["source_model"] == "llama3":
+            source_lora_path = "ckpt/instruct_lm/llama3_alpha128_r64"
+        elif model_args["source_model"] == "llama31":
+            source_lora_path = "ckpt/instruct_lm/llama31_alpha128_r64"
+        else:
+            raise NotImplementedError()
+    else:
+        source_lora_path = f"ckpt/ptr/{src_}-{data_args['training_task']}"
+    print(f"loading adapters from {source_lora_path}")
+
+    model.load_adapter(source_lora_path, "default")
+    model.requires_grad_(False)
+    for name, param in model.named_parameters():
+        if "transform_matrix" in name:
+            param.requires_grad_(True)
+        # print(name, param.data.requires_grad)
     model.print_trainable_parameters()
 
     np.random.seed(222)
@@ -298,9 +321,6 @@ def main(argv):
     trainer.save_metrics("train", metrics)
     trainer.save_state()
 
-    ##################################
-    # Save model and create model card
-    ##################################
     logger.info("*** Save model ***")
     trainer.save_model(training_args.output_dir)
     logger.info(f"Model saved to {training_args.output_dir}")
@@ -317,6 +337,5 @@ def main(argv):
 if __name__ == "__main__":
     set_flags()
     app.run(main)
-
 
 

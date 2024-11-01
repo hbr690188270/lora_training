@@ -13,6 +13,7 @@ CUDA_VISIBLE_DEVICES=1 python -m tools.lora_transform.apply_transform \
     --output_path=ckpt/llama3/dream_absorb_transform/adapter_model.safetensors
 """
 import os
+import shutil
 
 import torch
 from absl import app, flags
@@ -69,6 +70,13 @@ def main(argv):
     if not os.path.exists(os.path.dirname(FLAGS.output_path)):
         os.makedirs(os.path.dirname(FLAGS.output_path))
     save_file(source_tensors, FLAGS.output_path)
+
+    adatper_dir = os.path.dirname(FLAGS.adapter_path)
+    adater_config_path = os.path.join(adatper_dir, "adapter_config.json")
+    output_dir = os.path.dirname(FLAGS.output_path)
+    output_config_path = os.path.join(output_dir, "adapter_config.json")
+    shutil.copy(adater_config_path, output_config_path)
+
 
 if __name__ == "__main__":
     set_flags()

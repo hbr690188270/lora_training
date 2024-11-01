@@ -9,7 +9,8 @@ from transformers import (
 
 def load_lora_weights(model = "source"):
     if model == "source":
-        adapter_path = "ckpt/instruct_lm/llama3_alpha128_r64/checkpoint-16797/adapter_model.safetensors"
+        # adapter_path = "ckpt/instruct_lm/llama3_alpha128_r64/checkpoint-16797/adapter_model.safetensors"
+        adapter_path = "ckpt/ptr/mistral-7b-v3-gsm8k/adapter_model.safetensors"
     elif model == "target":
         adapter_path = "ckpt/instruct_lm/llama31_alpha128_r64/checkpoint-16797/adapter_model.safetensors"
     tensors = {}
@@ -26,7 +27,8 @@ def compute_lora_magnitude():
 
     device = torch.device("cuda")
 
-    for layer_idx in range(32):
+    # for layer_idx in range(32):
+    for layer_idx in [1, 5, 31]:
         print(f"================Layer {layer_idx}================")
         for module in ["q", "k", "v", "o"]:
             lora_B = f"base_model.model.model.layers.{layer_idx}.self_attn.{module}_proj.lora_B.weight"
@@ -59,7 +61,8 @@ def main():
         device_map=None,
         cache_dir='./model_cache'
     )
-    model_name_or_path = "model_cache/llama3-8b"
+    # model_name_or_path = "model_cache/llama3-8b"
+    model_name_or_path = "model_cache/mistral-7b-v3"
     llama3_model: LlamaForCausalLM = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
         **model_kwargs
@@ -71,7 +74,8 @@ def main():
         **model_kwargs
     )
     print(len(llama3_model.model.layers))
-    for layer_idx in range(32):
+    # for layer_idx in range(32):
+    for layer_idx in [1, 5, 31]:
         source_q_norm = torch.norm(llama3_model.model.layers[layer_idx].self_attn.q_proj.weight.data)
         source_k_norm = torch.norm(llama3_model.model.layers[layer_idx].self_attn.k_proj.weight.data)
         source_v_norm = torch.norm(llama3_model.model.layers[layer_idx].self_attn.v_proj.weight.data)
@@ -90,6 +94,6 @@ def main():
         print()
 
 if __name__ == "__main__":
-    main()
-    # compute_lora_magnitude()
+    # main()
+    compute_lora_magnitude()
 
