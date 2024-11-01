@@ -43,10 +43,9 @@ class Linear(nn.Module, lora_layer.LoraLayer):
             use_dora=use_dora,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.lora_transform_matrix = nn.ModuleDict({})
-        self.lora_transform_matrix[adapter_name] = nn.Linear(r, r, bias=False)
+        self.lora_transform_matrix = nn.Linear(r, r, bias=False)
         with torch.no_grad():
-            self.lora_transform_matrix[adapter_name].weight.copy_(torch.eye(r))
+            self.lora_transform_matrix.weight.copy_(torch.eye(r))
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -98,7 +97,23 @@ class Linear(nn.Module, lora_layer.LoraLayer):
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
         elif adapter_names is not None:
-            result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+            # result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+            result = self.base_layer(x, *args, **kwargs)
+            if type(adapter_names) is list:
+                adapter_names = adapter_names[0]
+
+            torch_result_dtype = result.dtype
+            lora_A = self.lora_A[adapter_names]
+            lora_B = self.lora_B[adapter_names]
+            dropout = self.lora_dropout[adapter_names]
+            scaling = self.scaling[adapter_names]
+            x = x.to(lora_A.weight.dtype)
+
+            result = result + lora_B(
+                self.lora_transform_matrix[adapter_names](lora_A(dropout(x)))
+            ) * scaling
+            result = result.to(torch_result_dtype)
+
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
@@ -116,7 +131,7 @@ class Linear(nn.Module, lora_layer.LoraLayer):
                 if not self.use_dora[active_adapter]:
                     # Apply the transformation matrix
                     result = result + lora_B(
-                        self.lora_transform_matrix[active_adapter](lora_A(dropout(x)))
+                        self.lora_transform_matrix(lora_A(dropout(x)))
                     ) * scaling
                 else:
                     raise NotImplementedError()
