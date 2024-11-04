@@ -40,6 +40,13 @@ def set_flags():
         None,
         help="Path to save the converted LoRA weights",
     )
+    flags.DEFINE_enum(
+        "transform_type",
+        None,
+        ["BTA", "PQBA"],
+        help="Path to save the converted LoRA weights",
+    )
+
 
 def main(argv):
     transform_tensors = {}
@@ -59,13 +66,28 @@ def main(argv):
     num_layers = 32
     for idx in range(num_layers):
         for module in ["q", "k", "v", "o"]:
-            lora_A_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_A.weight"
-            lora_transform_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix.weight"
-
-            lora_A = source_tensors.pop(lora_A_key).float().to(device)
-            lora_transform = transform_tensors.pop(lora_transform_key).float().to(device)
-            new_lora_A = torch.matmul(lora_transform, lora_A).bfloat16().cpu()
-            source_tensors[lora_A_key] = new_lora_A
+            if FLAGS.transform_type == "BTA":
+                lora_A_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_A.weight"
+                lora_A = source_tensors.pop(lora_A_key).float().to(device)
+                lora_transform_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix.weight"
+                lora_transform = transform_tensors.pop(lora_transform_key).float().to(device)
+                new_lora_A = torch.matmul(lora_transform, lora_A).bfloat16().cpu()
+                source_tensors[lora_A_key] = new_lora_A
+            elif FLAGS.transform_type == "PQBA":
+                lora_B_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_B.weight"
+                lora_B = source_tensors.pop(lora_B_key).float().to(device)
+                p_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_p.weight"
+                q_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_q.weight"
+                p_transform = transform_tensors.pop(p_key).float().to(device)
+                q_transform = transform_tensors.pop(q_key).float().to(device)
+                new_lora_B = torch.matmul(
+                    p_transform, torch.matmul(
+                        q_transform, lora_B
+                    )
+                )
+                source_tensors[lora_B_key] = new_lora_B
+            else:
+                raise NotImplementedError()
 
     if not os.path.exists(os.path.dirname(FLAGS.output_path)):
         os.makedirs(os.path.dirname(FLAGS.output_path))
