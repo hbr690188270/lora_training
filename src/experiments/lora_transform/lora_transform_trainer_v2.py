@@ -125,10 +125,120 @@ def load_lora_transform_configs():
                     trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
     return trainer_configs
 
+def load_rand_init_BTA_configs():
+    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    config_params = [
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "gsm8k",]
+    ]
+    for source_model, target_model, training_task in config_params:
+        src_ = os.path.basename(source_model)
+        tgt_ = os.path.basename(target_model)
+        if source_model == target_model:
+            continue
+        model_args = dict(
+            source_model=source_model,
+            target_model=target_model,
+            torch_dtype=torch.bfloat16,
+            use_peft=True,
+            trust_remote_code=True,
+            use_flash_attention_2=True,
+            lora_r=64,
+            lora_alpha=128,
+            lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            lora_modules_to_save=None,
+            lora_transform_type="BTA_random",
+            lora_dropout=0.05,
+        )
+        data_args = dict(
+            training_task=training_task,
+        )
+        if training_task == "sft":
+            recipe_names = ["sft"]
+        else:
+            recipe_names = ["ptr_default", "ptr_lr5e-5", "ptr_lr1e-4", "ptr_lr5e-4"]
+        for recipe_name in recipe_names:
+            sft_training_args = TRAINING_RECIPE[recipe_name]
+            output_dir = (
+                f"ckpt/rand_BTA/{src_}-{tgt_}-{training_task}-{recipe_name}/"
+            )
+            run_name = (
+                f"ckpt/rand_BTA/{src_}-{tgt_}-{training_task}-{recipe_name}/"
+            )
+            sft_training_args = replace(
+                sft_training_args,
+                output_dir=output_dir,
+                run_name=run_name,
+            )
+            cfg_name = (
+                f"rand_BTA-{src_}-{tgt_}-{training_task}-{recipe_name}"
+            )
+            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
+    return trainer_configs
+
+def load_PQBA_configs():
+    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    config_params = [
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "gsm8k",],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "arc",]
+    ]
+    for source_model, target_model, training_task in config_params:
+        src_ = os.path.basename(source_model)
+        tgt_ = os.path.basename(target_model)
+        if source_model == target_model:
+            continue
+        model_args = dict(
+            source_model=source_model,
+            target_model=target_model,
+            torch_dtype=torch.bfloat16,
+            use_peft=True,
+            trust_remote_code=True,
+            use_flash_attention_2=True,
+            lora_r=64,
+            lora_alpha=128,
+            lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            lora_modules_to_save=None,
+            lora_transform_type="PQBA",
+            lora_dropout=0.05,
+        )
+        data_args = dict(
+            training_task=training_task,
+        )
+        if training_task == "sft":
+            recipe_names = ["sft"]
+        else:
+            recipe_names = ["ptr_default", "ptr_lr5e-5", "ptr_lr1e-4", "ptr_lr5e-4"]
+        for recipe_name in recipe_names:
+            sft_training_args = TRAINING_RECIPE[recipe_name]
+            output_dir = (
+                f"ckpt/PQBA_transform/{src_}-{tgt_}-{training_task}-{recipe_name}/"
+            )
+            run_name = (
+                f"ckpt/PQBA_transform/{src_}-{tgt_}-{training_task}-{recipe_name}/"
+            )
+            sft_training_args = replace(
+                sft_training_args,
+                output_dir=output_dir,
+                run_name=run_name,
+            )
+            cfg_name = (
+                f"PQBA-{src_}-{tgt_}-{training_task}-{recipe_name}"
+            )
+            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
+    return trainer_configs
+
+
 def named_trainer_configs():
     trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+
     pretraining_configs = load_lora_transform_configs()
     trainer_configs.update(pretraining_configs)
+
+    rand_init_BTA_configs = load_rand_init_BTA_configs()
+    trainer_configs.update(rand_init_BTA_configs)
+
+    PQBA_configs = load_PQBA_configs()
+    trainer_configs.update(PQBA_configs)
+
     return trainer_configs
 
 
