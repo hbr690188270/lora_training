@@ -487,5 +487,9 @@ class DataCollatorForInstructLM:
             "labels": all_labels,
             "attention_mask": all_attention_masks,
         }
+        if "dataset_index" in features[0]:
+            all_dataset_ids = torch.LongTensor([x["dataset_index"] for x in features])
+            # batch["dataset_index"] = all_dataset_ids
+            batch["adapter_names"] = all_dataset_ids
         return batch
 

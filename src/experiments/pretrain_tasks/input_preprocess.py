@@ -106,10 +106,12 @@ class pretraining_task_preprocessor():
             }
             return out_doc
 
-        example.update(_process_doc(example))
+        updated_example = _process_doc(example)
 
         choice_id = int(example["label"])
-        input_text = example["query"] + " " + example["choices"][choice_id]
+        input_text = (
+            updated_example["query"] + " " + updated_example["choices"][choice_id]
+        )
 
         input_ids = self.tokenizer(
             input_text,

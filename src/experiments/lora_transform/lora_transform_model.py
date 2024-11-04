@@ -109,3 +109,37 @@ class PQBALoraModel(PeftModel):
         if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
             self.base_model.config.pretraining_tp = 1
 
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
+        """
+        Add an adapter to the model based on the passed configuration.
+
+        This adapter is not trained. To load a trained adapter, check out [`PeftModel.load_adapter`].
+
+        The name for the new adapter should be unique.
+
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
+
+        Args:
+            adapter_name (`str`):
+                The name of the adapter to be added.
+            peft_config ([`PeftConfig`]):
+                The configuration of the adapter to be added.
+            low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
+                Create empty adapter weights on meta device. Useful to speed up the process when loading saved
+                adapters. Don't use this option when creating a new PEFT adapter for training.
+
+        """
+        if peft_config.peft_type != self.peft_type:
+            raise ValueError(
+                f"Cannot combine adapters with different peft types. "
+                f"Found {self.peft_type} and {peft_config.peft_type}."
+            )
+
+        self.peft_config[adapter_name] = peft_config
+        self.base_model.inject_adapter(
+            self.base_model.model, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
+        )
+        self.set_additional_trainable_modules(peft_config, adapter_name)
+
+

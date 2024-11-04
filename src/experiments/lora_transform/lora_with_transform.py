@@ -1,5 +1,7 @@
 import re
 import warnings
+from contextlib import contextmanager
+from functools import partial
 from itertools import chain
 from typing import Any, Optional, Union
 
@@ -7,9 +9,15 @@ import peft.tuners.lora.layer as lora_layer
 import torch
 import torch.nn as nn
 from peft import LoraConfig, LoraModel
+from peft.tuners.lora.model import _adapter_names_pre_forward_hook
 from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.utils import (
+    ModulesToSaveWrapper,
+)
 from peft.utils.other import transpose
 from transformers.pytorch_utils import Conv1D
+
+from src.experiments.lora_transform.train_utils import INDEX_TO_DATASET
 
 
 class Linear(nn.Module, lora_layer.LoraLayer):
@@ -174,10 +182,8 @@ class PQBALinear(nn.Module, lora_layer.LoraLayer):
             use_dora=use_dora,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.lora_transform_matrix_p = nn.ModuleDict({})
-        self.lora_transform_matrix_q = nn.ModuleDict({})
-        self.lora_transform_matrix_p[adapter_name] = nn.Linear(r, self.out_features, bias=False)
-        self.lora_transform_matrix_q[adapter_name] = nn.Linear(self.out_features, r, bias=False)
+        self.lora_transform_matrix_p = nn.Linear(r, self.out_features, bias=False)
+        self.lora_transform_matrix_q = nn.Linear(self.out_features, r, bias=False)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -197,8 +203,8 @@ class PQBALinear(nn.Module, lora_layer.LoraLayer):
 
         weight_A = self.lora_A[adapter].weight
         weight_B = self.lora_B[adapter].weight
-        transform_weight_p = self.lora_transform_matrix_p[adapter].weight
-        transform_weight_q = self.lora_transform_matrix_q[adapter].weight
+        transform_weight_p = self.lora_transform_matrix_p.weight
+        transform_weight_q = self.lora_transform_matrix_q.weight
 
         if cast_to_fp32:
             weight_A = weight_A.float()
@@ -222,14 +228,60 @@ class PQBALinear(nn.Module, lora_layer.LoraLayer):
             # cast back the weights
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
-            self.lora_transform_matrix_p[adapter].weight.data = transform_weight_p.to(dtype)
-            self.lora_transform_matrix_q[adapter].weight.data = transform_weight_q.to(dtype)
+            self.lora_transform_matrix_p.weight.data = transform_weight_p.to(dtype)
+            self.lora_transform_matrix_q.weight.data = transform_weight_q.to(dtype)
 
         return output_tensor
 
+    def _mixed_batch_forward(
+        self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+    ) -> torch.Tensor:
+        # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+        # extra argument that allows mixing different adapters in the same batch at inference time.
+        result = self.base_layer(x, *args, **kwargs)
+        torch_result_dtype = result.dtype
+
+        unique_adapters = set(adapter_names)
+        sub_batch_indices_list = []
+        for adapter in unique_adapters:
+            sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+        for i, active_adapter in enumerate(unique_adapters):
+            if active_adapter == "__base__":
+                continue
+            if active_adapter not in self.lora_A.keys():
+                continue
+
+            lora_A = self.lora_A[active_adapter]
+            lora_B = self.lora_B[active_adapter]
+            dropout = self.lora_dropout[active_adapter]
+            scaling = self.scaling[active_adapter]
+
+            # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
+            # layer output
+            sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
+
+            lora_change = lora_B(lora_A(dropout(sub_batch)))
+            transformed_change = self.lora_transform_matrix_p(
+                self.lora_transform_matrix_q(lora_change)
+            )
+
+            lora_output = transformed_change * scaling
+            # result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
+            result[sub_batch_indices_list[i]] = (
+                result[sub_batch_indices_list[i]] + lora_output.to(torch_result_dtype)
+            )
+
+        return result
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        # import ipdb
+        # ipdb.set_trace()
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
+        # dataset_index = kwargs.pop("dataset_index", None)
+        adapter_names = [INDEX_TO_DATASET[x] for x in adapter_names]
+
 
         if self.disable_adapters:
             if self.merged:
@@ -254,8 +306,8 @@ class PQBALinear(nn.Module, lora_layer.LoraLayer):
                 if not self.use_dora[active_adapter]:
                     # Apply the transformation matrix
                     lora_change = lora_B(lora_A(dropout(x)))
-                    transformed_change = self.lora_transform_matrix_p[active_adapter](
-                        self.lora_transform_matrix_q[active_adapter](lora_change)
+                    transformed_change = self.lora_transform_matrix_p(
+                        self.lora_transform_matrix_q(lora_change)
                     )
                     result = result + transformed_change * scaling
                 else:
@@ -486,7 +538,17 @@ class LoraWithPQBATransform(LoraModel):
         # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
         from peft.tuners.adalora import AdaLoraLayer
 
-        if isinstance(target, lora_layer.LoraLayer) and not isinstance(target, AdaLoraLayer):
+        if isinstance(target, PQBALinear):
+            target.update_layer(
+                adapter_name,
+                r,
+                lora_alpha=alpha,
+                lora_dropout=lora_config.lora_dropout,
+                init_lora_weights=lora_config.init_lora_weights,
+                use_rslora=lora_config.use_rslora,
+                use_dora=lora_config.use_dora,
+            )
+        elif isinstance(target, lora_layer.LoraLayer) and not isinstance(target, AdaLoraLayer):
             raise NotImplementedError()
         else:
             new_module = self._create_new_module(
@@ -499,5 +561,29 @@ class LoraWithPQBATransform(LoraModel):
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
+
+    @contextmanager
+    def _enable_peft_forward_hooks(self, *args, **kwargs):
+        # If adapter_names is passed as an argument, we inject it into the forward arguments.
+        adapter_names = kwargs.pop("adapter_names", None)
+        if adapter_names is None:
+            # nothing to do
+            yield
+            return
+
+        # if self.training:
+        #     raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
+
+        hook_handles = []
+        for module in self.modules():
+            if isinstance(module, lora_layer.LoraLayer) or isinstance(module, ModulesToSaveWrapper):
+                pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
+                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
+
+        yield
+
+        for handle in hook_handles:
+            handle.remove()
 
 
