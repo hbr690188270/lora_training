@@ -50,6 +50,10 @@ logger = logging.getLogger(__name__)
 
 FLAGS = flags.FLAGS
 
+TASKSET_ID_TO_TASKS = {
+    "v1"
+}
+
 def set_flags():
     flags.DEFINE_string(
         "config_name",
@@ -57,8 +61,39 @@ def set_flags():
         help="Name of the trainer config. Must be defined in `named_trainer_configs()` function",
     )
 
-def load_lora_transform_configs():
-    pass
+def load_PQBA_transform_configs():
+    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    config_params = [
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1",],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2",]
+    ]
+    for source_model, target_model, task_set_id in config_params:
+        src_ = os.path.basename(source_model)
+        tgt_ = os.path.basename(target_model)
+        if source_model == target_model:
+            continue
+        model_args = dict(
+            source_model=source_model,
+            target_model=target_model,
+            torch_dtype=torch.bfloat16,
+            use_peft=True,
+            trust_remote_code=True,
+            use_flash_attention_2=True,
+            lora_r=64,
+            lora_alpha=128,
+            lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            lora_modules_to_save=None,
+            lora_transform_type="PQBA",
+            lora_dropout=0.05,
+        )
+        data_args = dict(
+            training_task=training_task,
+        )
+        if training_task == "sft":
+            recipe_names = ["sft"]
+        else:
+            recipe_names = ["ptr_default", "ptr_lr5e-5", "ptr_lr1e-4", "ptr_lr5e-4"]
+
 
 def get_configs(
     lora_source_model: str = "model_cache/llama3-8b",
