@@ -8,6 +8,12 @@ import src.experiments.lora_transform.mutli_task_trainer as mt
 configs = mt.named_trainer_configs()
 print(configs.keys())
 ```
+
+CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch \
+    --main_process_port 29504 \
+    --config_file configs/a6000_config.yaml \
+    src/experiments/lora_transform/lora_transform_trainer_v2.py \
+    --config_name=PQBA-llama3-8b-mistral-7b-v3-hellaswag-ptr_lr5e-4
 """
 
 import logging
