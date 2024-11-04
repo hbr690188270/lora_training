@@ -285,7 +285,6 @@ def main(argv):
     for name, param in model.named_parameters():
         if "transform_matrix" in name:
             param.requires_grad_(True)
-        # print(name, param.data.requires_grad)
     model.print_trainable_parameters()
 
     training_args.eval_on_start = False

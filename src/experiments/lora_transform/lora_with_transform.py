@@ -182,8 +182,8 @@ class PQBALinear(nn.Module, lora_layer.LoraLayer):
             use_dora=use_dora,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.lora_transform_matrix_p = nn.Linear(r, self.out_features, bias=False)
-        self.lora_transform_matrix_q = nn.Linear(self.out_features, r, bias=False)
+        self.lora_transform_matrix_default_p = nn.Linear(r, self.out_features, bias=False)
+        self.lora_transform_matrix_default_q = nn.Linear(self.out_features, r, bias=False)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -203,8 +203,8 @@ class PQBALinear(nn.Module, lora_layer.LoraLayer):
 
         weight_A = self.lora_A[adapter].weight
         weight_B = self.lora_B[adapter].weight
-        transform_weight_p = self.lora_transform_matrix_p.weight
-        transform_weight_q = self.lora_transform_matrix_q.weight
+        transform_weight_p = self.lora_transform_matrix_default_p.weight
+        transform_weight_q = self.lora_transform_matrix_default_q.weight
 
         if cast_to_fp32:
             weight_A = weight_A.float()
@@ -228,8 +228,8 @@ class PQBALinear(nn.Module, lora_layer.LoraLayer):
             # cast back the weights
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
-            self.lora_transform_matrix_p.weight.data = transform_weight_p.to(dtype)
-            self.lora_transform_matrix_q.weight.data = transform_weight_q.to(dtype)
+            self.lora_transform_matrix_default_p.weight.data = transform_weight_p.to(dtype)
+            self.lora_transform_matrix_default_q.weight.data = transform_weight_q.to(dtype)
 
         return output_tensor
 
@@ -262,8 +262,8 @@ class PQBALinear(nn.Module, lora_layer.LoraLayer):
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
 
             lora_change = lora_B(lora_A(dropout(sub_batch)))
-            transformed_change = self.lora_transform_matrix_p(
-                self.lora_transform_matrix_q(lora_change)
+            transformed_change = self.lora_transform_matrix_default_p(
+                self.lora_transform_matrix_default_q(lora_change)
             )
 
             lora_output = transformed_change * scaling
@@ -306,8 +306,8 @@ class PQBALinear(nn.Module, lora_layer.LoraLayer):
                 if not self.use_dora[active_adapter]:
                     # Apply the transformation matrix
                     lora_change = lora_B(lora_A(dropout(x)))
-                    transformed_change = self.lora_transform_matrix_p(
-                        self.lora_transform_matrix_q(lora_change)
+                    transformed_change = self.lora_transform_matrix_default_p(
+                        self.lora_transform_matrix_default_q(lora_change)
                     )
                     result = result + transformed_change * scaling
                 else:
