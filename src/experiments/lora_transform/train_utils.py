@@ -52,6 +52,7 @@ sft_train_config = replace(
     num_train_epochs=2,
 )
 
+
 short_seq_train_config = replace(
     DEFAULT_LORA_TRANSFORM_CONFIG,
     max_seq_length=768,
@@ -59,7 +60,7 @@ short_seq_train_config = replace(
     per_device_eval_batch_size=4,
 )
 
-large_lr_short_seq_train_config = replace(
+lr55_short_seq_train_config = replace(
     DEFAULT_LORA_TRANSFORM_CONFIG,
     max_seq_length=768,
     per_device_train_batch_size=4,
@@ -83,6 +84,17 @@ lr54_short_seq_train_config = replace(
     learning_rate=5e-4,
 )
 
+h100_lr54_short_seq_train_config = replace(
+    DEFAULT_LORA_TRANSFORM_CONFIG,
+    max_seq_length=768,
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=16,
+    learning_rate=5e-4,
+    gradient_accumulation_steps=1,
+)
+
+
+
 test_train_config = replace(
     DEFAULT_LORA_TRANSFORM_CONFIG,
     max_seq_length=100,
@@ -93,12 +105,22 @@ test_train_config = replace(
 )
 
 TRAINING_RECIPE = {
-    "sft": sft_train_config,
-    "ptr_default": short_seq_train_config,
-    "ptr_lr5e-5": large_lr_short_seq_train_config,
-    "ptr_lr1e-4": lr14_short_seq_train_config,
-    "ptr_lr5e-4": lr54_short_seq_train_config,
-    "test": lr54_short_seq_train_config,
+    "a6000": {
+        "sft": sft_train_config,
+        "ptr_default": short_seq_train_config,
+        "ptr_lr5e-5": lr55_short_seq_train_config,
+        "ptr_lr1e-4": lr14_short_seq_train_config,
+        "ptr_lr5e-4": lr54_short_seq_train_config,
+        "test": test_train_config,
+    },
+    "h100": {
+        "sft": None,
+        "ptr_default": None,
+        "ptr_lr5e-5": None,
+        "ptr_lr1e-4": None,
+        "ptr_lr5e-4": h100_lr54_short_seq_train_config,
+        "test": test_train_config,
+    },
 }
 
 

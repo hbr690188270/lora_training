@@ -22,6 +22,7 @@ import sys
 from dataclasses import replace
 from typing import Dict, Tuple
 
+import datasets
 import numpy as np
 import torch
 import transformers
@@ -29,7 +30,6 @@ from absl import app, flags
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
-import datasets
 from src.cmd_parser import (
     SFTConfig,
 )
@@ -39,6 +39,7 @@ from src.data_utils import (
 )
 from src.experiments.lora_transform.lora_transform_model import (
     PQBALoraModel,
+    PQBASTLoraModel,
 )
 from src.experiments.lora_transform.train_utils import (
     DATASET_TO_INDEX,
@@ -63,10 +64,12 @@ def set_flags():
 def load_PQBA_transform_configs():
     trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
     config_params = [
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1",],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2",]
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "a6000"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "a6000"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "h100"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "h100"],
     ]
-    for source_model, target_model, task_set_id in config_params:
+    for source_model, target_model, task_set_id, server_cfg in config_params:
         src_ = os.path.basename(source_model)
         tgt_ = os.path.basename(target_model)
         if source_model == target_model:
@@ -90,12 +93,14 @@ def load_PQBA_transform_configs():
         )
         recipe_names = ["ptr_default", "ptr_lr5e-5", "ptr_lr1e-4", "ptr_lr5e-4", "test"]
         for recipe_name in recipe_names:
-            sft_training_args = TRAINING_RECIPE[recipe_name]
+            sft_training_args = TRAINING_RECIPE[server_cfg][recipe_name]
+            if sft_training_args is None:
+                continue
             output_dir = (
-                f"ckpt/PQBA_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}/"
+                f"ckpt/PQBA_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
             )
             run_name = (
-                f"ckpt/PQBA_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}/"
+                f"ckpt/PQBA_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
             )
             sft_training_args = replace(
                 sft_training_args,
@@ -103,7 +108,59 @@ def load_PQBA_transform_configs():
                 run_name=run_name,
             )
             cfg_name = (
-                f"PQBA-{src_}-{tgt_}-mt{task_set_id}-{recipe_name}"
+                f"PQBA-{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+            )
+            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
+    return trainer_configs
+
+def load_PQBAST_transform_configs():
+    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    config_params = [
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "a6000"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "a6000"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "h100"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "h100"],
+    ]
+    for source_model, target_model, task_set_id, server_cfg in config_params:
+        src_ = os.path.basename(source_model)
+        tgt_ = os.path.basename(target_model)
+        if source_model == target_model:
+            continue
+        model_args = dict(
+            source_model=source_model,
+            target_model=target_model,
+            torch_dtype=torch.bfloat16,
+            use_peft=True,
+            trust_remote_code=True,
+            use_flash_attention_2=True,
+            lora_r=64,
+            lora_alpha=128,
+            lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            lora_modules_to_save=None,
+            lora_transform_type="PQBAST",
+            lora_dropout=0.05,
+        )
+        data_args = dict(
+            training_task=task_set_id,
+        )
+        recipe_names = ["ptr_default", "ptr_lr5e-5", "ptr_lr1e-4", "ptr_lr5e-4", "test"]
+        for recipe_name in recipe_names:
+            sft_training_args = TRAINING_RECIPE[server_cfg][recipe_name]
+            if sft_training_args is None:
+                continue
+            output_dir = (
+                f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
+            )
+            run_name = (
+                f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
+            )
+            sft_training_args = replace(
+                sft_training_args,
+                output_dir=output_dir,
+                run_name=run_name,
+            )
+            cfg_name = (
+                f"PQBAST-{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
             )
             trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
     return trainer_configs
@@ -111,8 +168,13 @@ def load_PQBA_transform_configs():
 
 def named_trainer_configs():
     trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+
     multi_task_configs = load_PQBA_transform_configs()
     trainer_configs.update(multi_task_configs)
+
+    multi_task_PQBAST_configs = load_PQBAST_transform_configs()
+    trainer_configs.update(multi_task_PQBAST_configs)
+
     return trainer_configs
 
 
@@ -272,6 +334,8 @@ def main(argv):
         raise NotImplementedError("Only support PQBA for multi-task learning!")
     elif model_args["lora_transform_type"] == "PQBA":
         model = PQBALoraModel(model, peft_config)
+    elif model_args["lora_transform_type"] == "PQBAST":
+        model = PQBASTLoraModel(model, peft_config)
     else:
         raise NotImplementedError()
 
