@@ -1,7 +1,11 @@
 compute_environment: LOCAL_MACHINE
 debug: false
 deepspeed_config:
+<<<<<<< HEAD
   gradient_accumulation_steps: 2
+=======
+  gradient_accumulation_steps: 1
+>>>>>>> origin/multi_task_lora_transform
   offload_optimizer_device: none
   offload_param_device: none
   zero3_init_flag: false
