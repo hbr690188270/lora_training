@@ -47,7 +47,8 @@ from src.experiments.lora_transform.train_utils import (
     TRAINING_RECIPE,
 )
 from src.experiments.pretrain_tasks.input_preprocess import (
-    pretraining_task_preprocessor,
+    PretrainingTaskPreprocessor,
+    get_dataset_and_preprocess_fn,
 )
 
 logger = logging.getLogger(__name__)
@@ -210,7 +211,7 @@ def main(argv):
     tokenizer = get_tokenizer(
         model_args["target_model"],
     )
-    preprocessor = pretraining_task_preprocessor(
+    preprocessor = PretrainingTaskPreprocessor(
         tokenizer=tokenizer,
         max_len=training_args.max_seq_length,
     )
@@ -223,47 +224,10 @@ def main(argv):
     all_valid_datasets = []
     all_test_datasets = []
     for task in training_tasks:
-        if task == "gsm8k":
-            dataset = datasets.load_dataset("openai/gsm8k", "main", split="train")
-            preprocess_fn = preprocessor.process_gsm8k
-            remove_columns=["question", "answer"]
-        elif task == "arc_challenge":
-            dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
-            preprocess_fn = preprocessor.process_arc
-            remove_columns=["question", "id", "choices", "answerKey"]
-        elif task == "arc_easy":
-            dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
-            preprocess_fn = preprocessor.process_arc
-            remove_columns=["question", "id", "choices", "answerKey"]
-        elif task == "arc":
-            arc_challenge = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
-            arc_easy = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
-            dataset = datasets.concatenate_datasets([arc_challenge, arc_easy],)
-            preprocess_fn = preprocessor.process_arc
-            remove_columns=["question", "id", "choices", "answerKey"]
-        elif task == "hellaswag":
-            dataset = datasets.load_dataset("Rowan/hellaswag",   split="train")
-            preprocess_fn = preprocessor.process_hellaswag
-            remove_columns=[
-                "ind", "activity_label", "ctx_a", "ctx_b",
-                "ctx", "endings", "split", "split_type", "label",
-                "source_id",
-            ]
-        elif task == "piqa":
-            dataset = datasets.load_dataset("ybisk/piqa", split="train", trust_remote_code=True)
-            preprocess_fn = preprocessor.process_piqa
-            remove_columns=["label", "goal", "sol1", "sol2"]
-        elif task == "winogrande":
-            dataset = datasets.load_dataset(
-                "allenai/winogrande",
-                "winogrande_xl",
-                split="train",
-                trust_remote_code=True
-            )
-            preprocess_fn = preprocessor.process_winogrand
-            remove_columns=["sentence", "option1", "option2", "answer"]
-        else:
-            raise NotImplementedError()
+        dataset, preprocess_fn, remove_columns = get_dataset_and_preprocess_fn(
+            task=task,
+            preprocessor=preprocessor,
+        )
         dataset = dataset.map(
             preprocess_fn,
             num_proc=32,

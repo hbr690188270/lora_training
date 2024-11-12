@@ -2,13 +2,12 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
+import datasets
 import numpy as np
 import torch
 from transformers import AutoTokenizer, PreTrainedTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from transformers.utils import PaddingStrategy
-
-import datasets
 
 
 def get_tokenizer(

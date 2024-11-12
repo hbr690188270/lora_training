@@ -1,6 +1,5 @@
 import copy
 
-import numpy as np
 import torch
 from absl.testing import absltest
 from transformers.models.llama.configuration_llama import LlamaConfig

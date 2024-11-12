@@ -7,15 +7,16 @@ CUDA_VISIBLE_DEVICES=5,6 ACCELERATE_LOG_LEVEL=info accelerate launch --main_proc
 import logging
 import sys
 
+import datasets
 import torch
 import transformers
+
 # from alignment import (
 #     get_peft_config,
 # )
 from peft import get_peft_model
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
-import datasets
 from src.cmd_parser import (
     DataArguments,
     ModelArguments,

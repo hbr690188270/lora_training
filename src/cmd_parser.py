@@ -15,14 +15,13 @@
 import dataclasses
 import os
 import sys
-import yaml
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, NewType, Optional, Tuple, Union
 
 import transformers
+import yaml
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
-
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)

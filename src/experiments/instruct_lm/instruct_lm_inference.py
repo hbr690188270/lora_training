@@ -23,6 +23,7 @@ CUDA_VISIBLE_DEVICES=2 python instruct_lm_inference.py \
 import json
 import logging
 
+import datasets
 import torch
 import tqdm
 import transformers
@@ -30,7 +31,6 @@ from absl import app, flags
 from peft import LoraConfig, PeftModel
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
-import datasets
 from src.common import move_to_target_device
 from src.data_utils import (
     get_instruct_lm_tokenizer,

@@ -2,7 +2,7 @@ from absl.testing import absltest
 from transformers import AutoTokenizer
 
 from src.experiments.pretrain_tasks.input_preprocess import (
-    pretraining_task_preprocessor,
+    PretrainingTaskPreprocessor,
 )
 
 
@@ -88,7 +88,7 @@ class pretraining_processor_test(absltest.TestCase):
 
     def test_gsm8k(self):
         example = make_gsm8k_data()
-        preprocessor = pretraining_task_preprocessor(
+        preprocessor = PretrainingTaskPreprocessor(
             tokenizer=self.tokenizer,
             max_len=2048,
         )
@@ -111,7 +111,7 @@ class pretraining_processor_test(absltest.TestCase):
 
     def test_arc_process(self):
         example = make_arc_data()
-        preprocessor = pretraining_task_preprocessor(
+        preprocessor = PretrainingTaskPreprocessor(
             tokenizer=self.tokenizer,
             max_len=768
         )
@@ -133,7 +133,7 @@ class pretraining_processor_test(absltest.TestCase):
 
     def test_hellaswag_process(self):
         example = make_hellaswag_data()
-        preprocessor = pretraining_task_preprocessor(
+        preprocessor = PretrainingTaskPreprocessor(
             tokenizer=self.tokenizer,
             max_len=768
         )
@@ -157,7 +157,7 @@ class pretraining_processor_test(absltest.TestCase):
 
     def test_winogrande_process(self):
         example = make_winogrande_data()
-        preprocessor = pretraining_task_preprocessor(
+        preprocessor = PretrainingTaskPreprocessor(
             tokenizer=self.tokenizer,
             max_len=768
         )
@@ -181,7 +181,7 @@ class pretraining_processor_test(absltest.TestCase):
 
     def test_piqa_process(self):
         example = make_piqa_data()
-        preprocessor = pretraining_task_preprocessor(
+        preprocessor = PretrainingTaskPreprocessor(
             tokenizer=self.tokenizer,
             max_len=768
         )

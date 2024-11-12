@@ -49,7 +49,7 @@ from src.experiments.lora_transform.train_utils import (
     TRAINING_RECIPE,
 )
 from src.experiments.pretrain_tasks.input_preprocess import (
-    pretraining_task_preprocessor,
+    PretrainingTaskPreprocessor,
 )
 
 logger = logging.getLogger(__name__)
@@ -285,7 +285,7 @@ def main(argv):
         tokenizer = get_tokenizer(
             model_args["target_model"],
         )
-        preprocessor = pretraining_task_preprocessor(
+        preprocessor = PretrainingTaskPreprocessor(
             tokenizer=tokenizer,
             max_len=training_args.max_seq_length,
         )

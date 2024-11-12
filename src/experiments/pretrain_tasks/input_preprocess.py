@@ -1,10 +1,11 @@
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
+import datasets
 from transformers import PreTrainedTokenizerBase
 
 
-class pretraining_task_preprocessor():
+class PretrainingTaskPreprocessor():
     def __init__(
         self,
         tokenizer: PreTrainedTokenizerBase,
@@ -194,6 +195,56 @@ class pretraining_task_preprocessor():
             "input_ids": input_ids,
             "labels": labels,
         }
+
+
+def get_dataset_and_preprocess_fn(
+    task: str,
+    preprocessor: Optional[PretrainingTaskPreprocessor],
+):
+    if task == "gsm8k":
+        dataset = datasets.load_dataset("openai/gsm8k", "main", split="train")
+        preprocess_fn = preprocessor.process_gsm8k
+        remove_columns=["question", "answer"]
+    elif task == "arc_challenge":
+        dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
+        preprocess_fn = preprocessor.process_arc
+        remove_columns=["question", "id", "choices", "answerKey"]
+    elif task == "arc_easy":
+        dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
+        preprocess_fn = preprocessor.process_arc
+        remove_columns=["question", "id", "choices", "answerKey"]
+    elif task == "arc":
+        arc_challenge = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
+        arc_easy = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
+        dataset = datasets.concatenate_datasets([arc_challenge, arc_easy],)
+        preprocess_fn = preprocessor.process_arc
+        remove_columns=["question", "id", "choices", "answerKey"]
+    elif task == "hellaswag":
+        dataset = datasets.load_dataset("Rowan/hellaswag",   split="train")
+        preprocess_fn = preprocessor.process_hellaswag
+        remove_columns=[
+            "ind", "activity_label", "ctx_a", "ctx_b",
+            "ctx", "endings", "split", "split_type", "label",
+            "source_id",
+        ]
+    elif task == "piqa":
+        dataset = datasets.load_dataset("ybisk/piqa", split="train", trust_remote_code=True)
+        preprocess_fn = preprocessor.process_piqa
+        remove_columns=["label", "goal", "sol1", "sol2"]
+    elif task == "winogrande":
+        dataset = datasets.load_dataset(
+            "allenai/winogrande",
+            "winogrande_xl",
+            split="train",
+            trust_remote_code=True
+        )
+        preprocess_fn = preprocessor.process_winogrand
+        remove_columns=["sentence", "option1", "option2", "answer"]
+    else:
+        raise NotImplementedError()
+
+    return dataset, preprocess_fn, remove_columns
+
 
 
 

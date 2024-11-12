@@ -12,6 +12,7 @@ CUDA_VISIBLE_DEVICES=2 python instruct_lm_evaler.py \
 
 import logging
 
+import datasets
 import numpy as np
 import torch
 import tqdm
@@ -20,7 +21,6 @@ from peft import LoraConfig, PeftModel
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
-import datasets
 from src.common import move_to_target_device
 from src.data_utils import (
     DataCollatorForInstructLM,

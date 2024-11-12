@@ -20,6 +20,7 @@ import os
 import sys
 from collections import defaultdict
 
+import datasets
 import numpy as np
 import torch
 import transformers
@@ -27,7 +28,6 @@ from absl import app, flags
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
-import datasets
 from src.cmd_parser import (
     DataArguments,
     ModelArguments,
@@ -38,7 +38,8 @@ from src.data_utils import (
     get_tokenizer,
 )
 from src.experiments.pretrain_tasks.input_preprocess import (
-    pretraining_task_preprocessor,
+    PretrainingTaskPreprocessor,
+    get_dataset_and_preprocess_fn,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,7 +181,7 @@ def main(argv):
     tokenizer = get_tokenizer(
         model_args.model_name_or_path,
     )
-    preprocessor = pretraining_task_preprocessor(
+    preprocessor = PretrainingTaskPreprocessor(
         tokenizer=tokenizer,
         max_len=training_args.max_seq_length,
     )
@@ -189,46 +190,10 @@ def main(argv):
         tokenizer=tokenizer,
     )
 
-    if data_args.dataset_name == "gsm8k":
-        dataset = datasets.load_dataset("openai/gsm8k", "main", split="train")
-        preprocess_fn = preprocessor.process_gsm8k
-        remove_columns=["question", "answer"]
-    elif data_args.dataset_name == "arc_challenge":
-        dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
-        preprocess_fn = preprocessor.process_arc
-        remove_columns=["question", "id", "choices", "answerKey"]
-    elif data_args.dataset_name == "arc_easy":
-        dataset = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
-        preprocess_fn = preprocessor.process_arc
-        remove_columns=["question", "id", "choices", "answerKey"]
-    elif data_args.dataset_name == "arc":
-        arc_challenge = datasets.load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train")
-        arc_easy = datasets.load_dataset("allenai/ai2_arc", "ARC-Easy", split="train")
-        dataset = datasets.concatenate_datasets([arc_challenge, arc_easy],)
-        preprocess_fn = preprocessor.process_arc
-        remove_columns=["question", "id", "choices", "answerKey"]
-    elif data_args.dataset_name == "hellaswag":
-        dataset = datasets.load_dataset("Rowan/hellaswag",   split="train")
-        preprocess_fn = preprocessor.process_hellaswag
-        remove_columns=[
-            "ind", "activity_label", "ctx_a", "ctx_b",
-            "ctx", "endings", "split", "split_type", "label"
-        ]
-    elif data_args.dataset_name == "piqa":
-        dataset = datasets.load_dataset("ybisk/piqa",   split="train", trust_remote_code=True)
-        preprocess_fn = preprocessor.process_piqa
-        remove_columns=["label", "goal", "sol1", "sol2"]
-    elif data_args.dataset_name == "winogrande":
-        dataset = datasets.load_dataset(
-            "allenai/winogrande",
-            "winogrande_xl",
-            split="train",
-            trust_remote_code=True
-        )
-        preprocess_fn = preprocessor.process_winogrand
-        remove_columns=["sentence", "option1", "option2", "answer"]
-    else:
-        raise NotImplementedError()
+    dataset, preprocess_fn, remove_columns = get_dataset_and_preprocess_fn(
+        task=data_args.dataset_name,
+        preprocessor=preprocessor,
+    )
 
     dataset = dataset.map(
         preprocess_fn,
