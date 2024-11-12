@@ -1,11 +1,17 @@
 """
+Merge the learned transformation matrices, such as BTA, PQBA, into the original LoRA adapters.
+    - BTA: multiple matrix T with A to get the new A
+    - PQBA: multiple P Q B to get the new B
+
 CUDA_VISIBLE_DEVICES=1 python -m tools.lora_transform.apply_transform \
     --adapter_path=ckpt/instruct_lm/llama3_transform_for_31_alpha128_r64/checkpoint-11500/adapter_model.safetensors \
     --source_path=ckpt/llama3/dream_read_the_following_conversation_and_answer_the_question_alpha128_r64_chat/adapter_model.safetensors \
     --output_path=ckpt/llama3/dream_absorb_transform/adapter_model.safetensors
 """
+import copy
 import os
 import shutil
+from typing import Dict
 
 import torch
 from absl import app, flags
@@ -40,13 +46,84 @@ def set_flags():
     )
 
 
+def absorb_transform(
+    transform_tensors: Dict[str, torch.Tensor],
+    source_tensors: Dict[str, torch.Tensor],
+):
+    """
+    Apply the transformation matrices stored in `transform_tensors` to the source
+    model's LoRAs stored in `source_tensors`.
+
+    Args:
+        transform_tensors: A model state dict that maps the parameter names to the weights
+            It contains the trained transformation matrices such as T in BTA and PQ in PQBA.
+        source_tensors: The state dict of the source model's adapter.
+            It only contains the LoRA adapters, B and A in each module and layer.
+    Returns:
+        updated_tensors: the `source_tensors` with transformation matrices being absorbed.
+    """
+
+    updated_tensor = copy.deepcopy(source_tensors)
+    device = torch.device("cuda")
+    num_layers = 32
+    for idx in range(num_layers):
+        for module in ["q", "k", "v", "o"]:
+            if FLAGS.transform_type == "BTA":
+                lora_A_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_A.weight"
+                lora_A = updated_tensor.pop(lora_A_key).float().to(device)
+                lora_transform_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix.weight"
+                lora_transform = transform_tensors.pop(lora_transform_key).float().to(device)
+                new_lora_A = torch.matmul(lora_transform, lora_A).bfloat16().cpu()
+                updated_tensor[lora_A_key] = new_lora_A
+            elif FLAGS.transform_type == "PQBA":
+                lora_B_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_B.weight"
+                lora_B = updated_tensor.pop(lora_B_key).float().to(device)
+                p_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_default_p.weight"
+                q_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_default_q.weight"
+                p_transform = transform_tensors.pop(p_key).float().to(device)
+                q_transform = transform_tensors.pop(q_key).float().to(device)
+                new_lora_B = torch.matmul(
+                    p_transform, torch.matmul(
+                        q_transform, lora_B
+                    )
+                )
+                updated_tensor[lora_B_key] = new_lora_B
+            elif FLAGS.transform_type == "PQBAST":
+                lora_B_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_B.weight"
+                lora_B = updated_tensor.pop(lora_B_key).float().to(device)
+                lora_A_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_A.weight"
+                lora_A = updated_tensor.pop(lora_A_key).float().to(device)
+                p_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_default_p.weight"
+                q_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_default_q.weight"
+                s_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_default_s.weight"
+                t_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_default_t.weight"
+                p_transform = transform_tensors.pop(p_key).float().to(device)
+                q_transform = transform_tensors.pop(q_key).float().to(device)
+                s_transform = transform_tensors.pop(s_key).float().to(device)
+                t_transform = transform_tensors.pop(t_key).float().to(device)
+                new_lora_B = torch.matmul(
+                    p_transform, torch.matmul(
+                        q_transform, lora_B
+                    )
+                )
+                new_lora_A = torch.matmul(
+                    torch.matmul(
+                        lora_A, s_transform
+                    ), t_transform
+                )
+
+                updated_tensor[lora_B_key] = new_lora_B
+                updated_tensor[lora_A_key] = new_lora_A
+            else:
+                raise NotImplementedError()
+
+    return updated_tensor
+
 def main(argv):
     transform_tensors = {}
     with safe_open(FLAGS.adapter_path, framework="pt", device="cpu") as f:
         for key in f.keys():
-            print(key)
             transform_tensors[key] = f.get_tensor(key)
-    pause = input("???")
 
     source_tensors = {}
     if FLAGS.source_path is None:
@@ -56,49 +133,11 @@ def main(argv):
             for key in f.keys():
                 source_tensors[key] = f.get_tensor(key)
 
-    device = torch.device("cuda")
-    num_layers = 32
-    for idx in range(num_layers):
-        for module in ["q", "k", "v", "o"]:
-            if FLAGS.transform_type == "BTA":
-                lora_A_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_A.weight"
-                lora_A = source_tensors.pop(lora_A_key).float().to(device)
-                lora_transform_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix.weight"
-                lora_transform = transform_tensors.pop(lora_transform_key).float().to(device)
-                new_lora_A = torch.matmul(lora_transform, lora_A).bfloat16().cpu()
-                source_tensors[lora_A_key] = new_lora_A
-            elif FLAGS.transform_type == "PQBA":
-                lora_B_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_B.weight"
-                lora_B = source_tensors.pop(lora_B_key).float().to(device)
-                p_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_p.weight"
-                q_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_q.weight"
-                p_transform = transform_tensors.pop(p_key).float().to(device)
-                q_transform = transform_tensors.pop(q_key).float().to(device)
-                new_lora_B = torch.matmul(
-                    p_transform, torch.matmul(
-                        q_transform, lora_B
-                    )
-                )
-                source_tensors[lora_B_key] = new_lora_B
-            elif FLAGS.transform_type == "PQBA_m":
-                lora_B_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_B.weight"
-                lora_B = source_tensors.pop(lora_B_key).float().to(device)
-                p_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_p.weight"
-                q_key = f"base_model.model.model.layers.{idx}.self_attn.{module}_proj.lora_transform_matrix_q.weight"
-                p_transform = transform_tensors.pop(p_key).float().to(device)
-                q_transform = transform_tensors.pop(q_key).float().to(device)
-                new_lora_B = torch.matmul(
-                    p_transform, torch.matmul(
-                        q_transform, lora_B
-                    )
-                )
-                source_tensors[lora_B_key] = new_lora_B
-            else:
-                raise NotImplementedError()
+    updated_tensors = absorb_transform(transform_tensors, source_tensors)
 
     if not os.path.exists(os.path.dirname(FLAGS.output_path)):
         os.makedirs(os.path.dirname(FLAGS.output_path))
-    save_file(source_tensors, FLAGS.output_path)
+    save_file(updated_tensors, FLAGS.output_path)
 
     adatper_dir = os.path.dirname(FLAGS.adapter_path)
     adater_config_path = os.path.join(adatper_dir, "adapter_config.json")

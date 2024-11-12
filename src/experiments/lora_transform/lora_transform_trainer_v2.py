@@ -22,6 +22,7 @@ import sys
 from dataclasses import replace
 from typing import Dict, Tuple
 
+import datasets
 import numpy as np
 import torch
 import transformers
@@ -29,7 +30,6 @@ from absl import app, flags
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, Trainer, set_seed
 
-import datasets
 from src.cmd_parser import (
     SFTConfig,
 )
