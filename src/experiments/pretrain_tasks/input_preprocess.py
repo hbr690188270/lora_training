@@ -4,6 +4,8 @@ from typing import Dict, List, Optional
 import datasets
 from transformers import PreTrainedTokenizerBase
 
+from src.data_utils import load_flan_subset
+
 
 class PretrainingTaskPreprocessor():
     def __init__(
@@ -196,10 +198,33 @@ class PretrainingTaskPreprocessor():
             "labels": labels,
         }
 
+    def process_flan(
+        self,
+        example: Dict[str, str],
+    ):
+        source_text = example["source"]
+        target_text = example["target"]
+
+        separator = " "
+        input_text = source_text + separator + target_text
+        input_ids = self.tokenizer(
+            input_text,
+            add_special_tokens=False,
+            padding=False,
+            truncation=True,
+            return_tensors=None,
+        )["input_ids"]
+        input_ids.append(self.eos_token_id)
+        labels = input_ids[:]
+        return {
+            "input_ids": input_ids,
+            "labels": labels,
+        }
 
 def get_dataset_and_preprocess_fn(
     task: str,
     preprocessor: Optional[PretrainingTaskPreprocessor],
+    FLAN_dataset: Optional[datasets.Dataset],
 ):
     if task == "gsm8k":
         dataset = datasets.load_dataset("openai/gsm8k", "main", split="train")
@@ -240,8 +265,15 @@ def get_dataset_and_preprocess_fn(
         )
         preprocess_fn = preprocessor.process_winogrand
         remove_columns=["sentence", "option1", "option2", "answer"]
+    # otherwise the task comes from FLAN_V2 and we use a unified preprocess fn
     else:
-        raise NotImplementedError()
+        assert FLAN_dataset is not None
+        dataset = load_flan_subset(flan_dataset=FLAN_dataset, taskname=task,)
+        remove_columns = [
+            "source", "target", "task_name", "task_source",
+            "template_type", "template_idx", "split",
+        ]
+        preprocess_fn = preprocessor.process_flan
 
     return dataset, preprocess_fn, remove_columns
 

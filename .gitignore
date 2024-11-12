@@ -6,6 +6,7 @@ ckpt/
 ckpt_phi35/
 datasets/
 model_cache/
+dataset_cache/
 wandb/
 
 test.py

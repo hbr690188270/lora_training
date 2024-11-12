@@ -43,6 +43,7 @@ from src.experiments.lora_transform.lora_transform_model import (
 )
 from src.experiments.lora_transform.train_utils import (
     DATASET_TO_INDEX,
+    FLAN_PATH,
     TASKSET_ID_TO_TASKS,
     TRAINING_RECIPE,
 )
@@ -69,6 +70,7 @@ def load_PQBA_transform_configs():
         ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "a6000"],
         ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "h100"],
         ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "h100"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v3", "h100"],
     ]
     for source_model, target_model, task_set_id, server_cfg in config_params:
         src_ = os.path.basename(source_model)
@@ -220,6 +222,10 @@ def main(argv):
         tokenizer=tokenizer,
     )
     training_tasks = TASKSET_ID_TO_TASKS[data_args["training_task"]]
+    flan_v2_dataset = None
+    if data_args["training_task"] in ["v3"]:
+        flan_v2_dataset = datasets.load_from_disk(FLAN_PATH)
+
     all_train_datasets = []
     all_valid_datasets = []
     all_test_datasets = []
@@ -227,6 +233,7 @@ def main(argv):
         dataset, preprocess_fn, remove_columns = get_dataset_and_preprocess_fn(
             task=task,
             preprocessor=preprocessor,
+            FLAN_dataset=flan_v2_dataset,
         )
         dataset = dataset.map(
             preprocess_fn,
@@ -266,8 +273,14 @@ def main(argv):
         seed=training_args.seed,
         stopping_strategy="all_exhausted",
     )
-    eval_dataset = datasets.concatenate_datasets(all_valid_datasets)
-    test_dataset = datasets.concatenate_datasets(all_test_datasets)
+    eval_dataset = datasets.DatasetDict(
+        {training_tasks[idx]: all_valid_datasets[idx] for idx in range(len(training_tasks))}
+    )
+    test_dataset = datasets.DatasetDict(
+        {training_tasks[idx]: all_test_datasets[idx] for idx in range(len(training_tasks))}
+    )
+    # eval_dataset = datasets.concatenate_datasets(all_valid_datasets)
+    # test_dataset = datasets.concatenate_datasets(all_test_datasets)
 
     logger.info("*** Load pretrained model ***")
 

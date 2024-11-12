@@ -1,3 +1,8 @@
+"""
+python tools/download_flan.py
+"""
+from typing import Dict
+
 import datasets
 import numpy as np
 from absl import app, flags
@@ -6,7 +11,6 @@ FLAGS = flags.FLAGS
 
 def set_flags():
     flags.DEFINE_boolean("verbose", default=True, help="Whether print the dataset infomation.")
-
 
 def main(argv):
     cutoff = 10000
@@ -21,7 +25,7 @@ def main(argv):
         print("Processing task: ", task_name)
 
         task_dataset = dataset.filter(
-            lambda x: x["task_name"] == task_name, num_proc=24
+            lambda x: (x["task_name"] == task_name and "fs" not in x["template_type"]), num_proc=24
         )
 
         # if the dataset is too large, we randomly sample "cutoff" examples for training
@@ -75,4 +79,7 @@ def main(argv):
     concatenated_datasets = concatenated_datasets.map(lambda x: clean_task(x))
     concatenated_datasets.save_to_disk("dataset_cache/flan_2021")
 
+if __name__ == "__main__":
+    set_flags()
+    app.run(main)
 

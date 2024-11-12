@@ -75,17 +75,20 @@ def get_instruct_lm_tokenizer(
     return tokenizer
 
 
-def load_from_general_dataset(
+def load_flan_subset(
+    flan_dataset: datasets.Dataset,
     taskname: str,
     n_proc: int = 32,
-    datapath: str = "/mnt/data/bairu/repos/adapter_transfer/modular_artifacts/flan-flat",
     savepath: Optional[str] = None,
 ):
+    if savepath is None:
+        savepath = f"dataset_cache/processed_data/{taskname}"
+    if os.path.exists(savepath):
+        return datasets.load_from_disk(savepath)
+
     # columns: 'source', 'target', 'task_name', 'task_source',
     #          'template_type', 'template_idx', 'split'
-    dataset = datasets.load_from_disk(datapath)["train"]
-
-    task_dataset = dataset.filter(
+    task_dataset = flan_dataset.filter(
         lambda x: x["task_name"] == taskname,
         num_proc=n_proc,
         desc="Filtering task names",
@@ -111,7 +114,7 @@ def load_from_general_dataset(
         test=test_set
     )
     if savepath is None:
-        savepath = f"datasets/processed_data/{taskname}"
+        savepath = f"dataset_cache/processed_data/{taskname}"
     dataset_dict.save_to_disk(savepath)
 
     return dataset_dict
@@ -239,62 +242,6 @@ def preprocess_fn_for_generation(
             "source_length": source_length,
         }
     return processed_examples
-
-def load_taskdataset(
-    taskname: str,
-    tokenizer: PreTrainedTokenizer,
-    for_generation = False,
-    savepath: Optional[str] = None,
-    apply_chat_template: bool = False,
-    n_proc: int = 32,
-):
-    """
-    load the dataset for training/evaluation/generation.
-    Args:
-        taskname: the taskname for the dataset
-        tokenizer: huggingface tokenizer
-        for_generation: whether this dataset is loaded for generation.
-            If true, will return the input and target ids separately
-            Otherwise, they will be concatenated for training/evaluation
-        savepath: the path the cache the dataset
-        apply_chat_template: whether convert the input into chat format
-        n_proc: number of process to tokenize the dataset
-    """
-    if savepath is not None:
-        if not os.path.exists(savepath):
-            raise ValueError("Please specify a valid path to the dataset!")
-    else:
-        savepath = f"datasets/processed_data/{taskname}"
-        print(f"Automatically create dataset for {taskname}")
-        print(f"Dataset will be saved to datasets/processed_data/{taskname}")
-        if not os.path.exists(savepath):
-            dataset_dict = load_from_general_dataset(taskname=taskname)
-        else:
-            dataset_dict = datasets.load_from_disk(savepath)
-
-    # only "source" and "target" will be left
-    dataset_dict = dataset_dict.remove_columns(
-        column_names=[
-            "task_name", "task_source",
-            "template_type", "template_idx", "split"
-        ]
-    )
-
-    if for_generation:
-        process_fn = preprocess_fn_for_generation
-    else:
-        process_fn = preprocess_fn
-    dataset_dict = dataset_dict.map(
-        process_fn,
-        fn_kwargs={
-            "tokenizer": tokenizer,
-            "apply_chat_template": apply_chat_template,
-        },
-        num_proc = n_proc,
-        remove_columns=["source", "target"],
-        batched=True,
-    )
-    return dataset_dict
 
 @dataclass
 class DataCollatorWithPaddingSFT:

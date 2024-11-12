@@ -4,18 +4,39 @@ from src.cmd_parser import (
     SFTConfig,
 )
 
+FLAN_PATH = "dataset_cache/flan_2021"
+
 TASKSET_ID_TO_TASKS = {
     "v1": ["gsm8k", "winogrande"],
     "v2": ["piqa", "arc", "hellaswag"],
+    "v3": [
+        "cot_esnli_ii", "cot_sensemaking", "cot_esnli", "stream_aqua", "cot_ecqa", "cot_creak_ii",
+        "cot_strategyqa", "cos_e_v1_11_generate_explanation_given_text", "wiki_bio_key_content",
+        "race_middle_Select_the_best_answer_no_instructions_", "drop_2_0_0",
+        "adversarial_qa_dbidaf_generate_question", "social_i_qa_Show_choices_and_generate_answer",
+        "qasc_is_correct_2", "race_middle_Taking_a_test", "quoref_Guess_Title_For_Context",
+        "duorc_ParaphraseRC_generate_question_by_answer", "definite_pronoun_resolution_1_1_0",
+        "adversarial_qa_droberta_tell_what_it_is", "super_glue_record_1_0_2",
+        "adversarial_qa_dbert_tell_what_it_is", "wiki_qa_Topic_Prediction_Question_Only",
+        "wiki_hop_original_choose_best_object_affirmative_3", "unified_qa_science_inst",
+        "duorc_SelfRC_decide_worth_it", "wiqa_does_the_supposed_perturbation_have_an_effect",
+    ]
 }
-DATASET_TO_INDEX = {
-    "arc": 0,
-    "hellaswag": 1,
-    "piqa": 2,
-    "winogrande": 3,
-    "gsm8k": 4,
-}
-INDEX_TO_DATASET = ["arc", "hellaswag", "piqa", "winogrande", "gsm8k"]
+
+INDEX_TO_DATASET = [
+    "arc", "hellaswag", "piqa", "winogrande", "gsm8k",
+    "cot_esnli_ii", "cot_sensemaking", "cot_esnli", "stream_aqua", "cot_ecqa", "cot_creak_ii",
+    "cot_strategyqa", "cos_e_v1_11_generate_explanation_given_text", "wiki_bio_key_content",
+    "race_middle_Select_the_best_answer_no_instructions_", "drop_2_0_0",
+    "adversarial_qa_dbidaf_generate_question", "social_i_qa_Show_choices_and_generate_answer",
+    "qasc_is_correct_2", "race_middle_Taking_a_test", "quoref_Guess_Title_For_Context",
+    "duorc_ParaphraseRC_generate_question_by_answer", "definite_pronoun_resolution_1_1_0",
+    "adversarial_qa_droberta_tell_what_it_is", "super_glue_record_1_0_2",
+    "adversarial_qa_dbert_tell_what_it_is", "wiki_qa_Topic_Prediction_Question_Only",
+    "wiki_hop_original_choose_best_object_affirmative_3", "unified_qa_science_inst",
+    "duorc_SelfRC_decide_worth_it", "wiqa_does_the_supposed_perturbation_have_an_effect",
+]
+DATASET_TO_INDEX = {INDEX_TO_DATASET[x]: x for x in range(len(INDEX_TO_DATASET))}
 
 DEFAULT_LORA_TRANSFORM_CONFIG = SFTConfig(
     max_seq_length=2048,
