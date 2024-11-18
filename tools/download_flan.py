@@ -22,6 +22,8 @@ def main(argv):
 
     all_datasets = []
     for task_name in task_names:
+        if task_name.startswith("task"):
+            continue
         print("Processing task: ", task_name)
 
         task_dataset = dataset.filter(
@@ -34,18 +36,6 @@ def main(argv):
         if cutoff > 0 and len(task_dataset) > cutoff:
             task_dataset = task_dataset.select(range(cutoff))
 
-        def assign_split(example, idx):
-            rng = np.random.RandomState(idx)
-            draw = rng.rand()
-            if draw < 0.8:
-                return {"split": "train"}
-            elif draw < 0.9:
-                return {"split": "validation"}
-            else:
-                return {"split": "test"}
-
-        task_dataset = task_dataset.map(assign_split, with_indices=True)
-        # randomly cut the dataset again
         task_dataset = task_dataset.shuffle(42)
 
         if cutoff and len(task_dataset) > cutoff:
@@ -55,11 +45,7 @@ def main(argv):
 
         print("Dumping task", task_name)
         if FLAGS.verbose:
-            print("# Train", len(task_dataset.filter(lambda x: x["split"] == "train")))
-            print("# Test", len(task_dataset.filter(lambda x: x["split"] == "test")))
-            print(
-                "# Val", len(task_dataset.filter(lambda x: x["split"] == "validation"))
-            )
+            print("# Train", len(task_dataset))
 
     concatenated_datasets: datasets.Dataset = datasets.concatenate_datasets(all_datasets)
 

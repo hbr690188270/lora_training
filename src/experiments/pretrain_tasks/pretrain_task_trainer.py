@@ -18,7 +18,7 @@ CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info \
 import logging
 import os
 import sys
-from collections import defaultdict
+from dataclasses import replace
 
 import datasets
 import numpy as np
@@ -31,11 +31,16 @@ from transformers import AutoModelForCausalLM, Trainer, set_seed
 from src.cmd_parser import (
     DataArguments,
     ModelArguments,
-    SFTConfig,
 )
 from src.data_utils import (
     DataCollatorForInstructLM,
     get_tokenizer,
+)
+from src.experiments.lora_transform.train_utils import (
+    FLAN_PATH,
+    INDEX_TO_DATASET,
+    TASKSET_ID_TO_TASKS,
+    h100_lr25_short_seq_train_config,
 )
 from src.experiments.pretrain_tasks.input_preprocess import (
     PretrainingTaskPreprocessor,
@@ -45,6 +50,7 @@ from src.experiments.pretrain_tasks.input_preprocess import (
 logger = logging.getLogger(__name__)
 
 FLAGS = flags.FLAGS
+os.environ["WANDB_PROJECT"]="LoRA-Transfer"
 
 def set_flags():
     flags.DEFINE_string(
@@ -53,30 +59,17 @@ def set_flags():
         help="Name of the trainer config. Must be defined in `named_trainer_configs()` function",
     )
 
-DATASET_TO_TRAIN_EPOCHS = defaultdict(lambda: 3)
-DATASET_TO_TRAIN_EPOCHS.update(
-    {
-        "arc": 3,
-        "arc_challenge": 3,
-        "arc_easy": 3,
-        "gsm8k": 3,
-        "hellaswag": 1,
-    }
-)
 
 def load_pretraining_tasks_configs():
     trainer_configs = {}
     for model_path in [
-        # "model_cache/llama3-8b", "model_cache/llama3_1-8b", "model_cache/mistral-7b-instruct-v3"
-        "model_cache/llama3-8b", "model_cache/llama3_1-8b", "model_cache/mistral-7b-v3"
+        # "model_cache/llama3-8b", "model_cache/llama3_1-8b", "model_cache/mistral-7b-v3"
+        "model_cache/llama3-8b", "model_cache/mistral-7b-v3",
     ]:
         model_name_for_shot = os.path.basename(model_path)
-        for taskname in [
-            "arc", "arc_challenge", "arc_easy", "gsm8k", "hellaswag", "winogrande", "piqa"
-        ]:
+        for taskname in INDEX_TO_DATASET:
             model_args = ModelArguments(
                 model_name_or_path=model_path,
-                model_name_for_short="llama3-8b",
                 torch_dtype=torch.bfloat16,
                 use_peft=True,
                 trust_remote_code=True,
@@ -89,50 +82,24 @@ def load_pretraining_tasks_configs():
             data_args = DataArguments(
                 dataset_name=taskname,
             )
-
-            if taskname == "gsm8k":
-                max_seq_length = 2048
-                per_device_train_batch_size = 2
-                per_device_eval_batch_size = 2
-            elif taskname in [
-                "arc_challenge", "arc_easy", "arc", "hellaswag", "winogrande", "piqa"
-            ]:
-                max_seq_length = 768
-                per_device_train_batch_size = 4
-                per_device_eval_batch_size = 4
-            else:
-                raise ValueError(f"Unrecognized task {taskname}")
-            sft_training_args = SFTConfig(
-                max_seq_length=max_seq_length,
-                per_device_train_batch_size=per_device_train_batch_size,
-                per_device_eval_batch_size=per_device_eval_batch_size,
-                gradient_accumulation_steps=4,
-                num_train_epochs=3,
-                learning_rate=2.0e-5,
-                optim="adamw_torch",
-                lr_scheduler_type="cosine",
-                do_eval=True,
-                bf16=True,
-                output_dir=f"ckpt/ptr/{model_name_for_shot}-{taskname}/",
-                save_only_model=True,
-                save_strategy="steps",
-                save_steps=2000,
-                save_total_limit=4,
-                remove_unused_columns=False,
-                report_to="wandb",
-                run_name=f"ptr-{model_name_for_shot}-{taskname}",
-                warmup_ratio=0.1,
-                seed=42,
-                push_to_hub=False,
-                logging_steps=10,
-                log_level="info",
-                gradient_checkpointing=False,
+            sft_training_args = h100_lr25_short_seq_train_config
+            output_dir = (
+                f"ckpt/ptr/{model_name_for_shot}-{taskname}"
+            )
+            run_name = (
+                f"ptr-{model_name_for_shot}-{taskname}"
+            )
+            sft_training_args = replace(
+                sft_training_args,
+                output_dir=output_dir,
+                run_name=run_name,
             )
 
             cfg_name = f"ptr-{model_name_for_shot}-{taskname}"
             trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
 
     return trainer_configs
+
 
 def named_trainer_configs():
     trainer_configs = {}
@@ -189,10 +156,14 @@ def main(argv):
     data_collator = DataCollatorForInstructLM(
         tokenizer=tokenizer,
     )
-
+    flan_v2_dataset = None
+    flan_tasks = TASKSET_ID_TO_TASKS["v3"] + TASKSET_ID_TO_TASKS["v4"] + TASKSET_ID_TO_TASKS["v5"]
+    if data_args.dataset_name in flan_tasks:
+        flan_v2_dataset = datasets.load_from_disk(FLAN_PATH)
     dataset, preprocess_fn, remove_columns = get_dataset_and_preprocess_fn(
         task=data_args.dataset_name,
         preprocessor=preprocessor,
+        FLAN_dataset=flan_v2_dataset,
     )
 
     dataset = dataset.map(

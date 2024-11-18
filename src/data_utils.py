@@ -96,28 +96,11 @@ def load_flan_subset(
     num_examples = len(task_dataset)
     print(f"Found {num_examples} examples in {taskname} data!")
 
-    np.random.seed(1234)
-    all_indices = np.random.permutation(num_examples)
-
-    train, val, _ = 0.8, 0.1, 0.1
-    train_idxs = all_indices[:int(num_examples * train)]
-    val_idxs = all_indices[int(num_examples * train): int(num_examples * (train + val))]
-    test_idxs = all_indices[int(num_examples * (train + val)):]
-
-    train_set = task_dataset.select(train_idxs)
-    val_set = task_dataset.select(val_idxs)
-    test_set = task_dataset.select(test_idxs)
-
-    dataset_dict = datasets.DatasetDict(
-        train=train_set,
-        val=val_set,
-        test=test_set
-    )
     if savepath is None:
         savepath = f"dataset_cache/processed_data/{taskname}"
-    dataset_dict.save_to_disk(savepath)
+    task_dataset.save_to_disk(savepath)
 
-    return dataset_dict
+    return task_dataset
 
 def preprocess_fn(
     example: Dict[str, List[str]],

@@ -4,7 +4,7 @@ The trainer to train a small transformation matrix based on multiple tasks and t
 To view all available configs, run:
 
 ```
-import src.experiments.lora_transform.mutli_task_trainer as mt
+import src.experiments.lora_transform.multi_task_trainer as mt
 configs = mt.named_trainer_configs()
 print(configs.keys())
 ```
@@ -13,7 +13,7 @@ CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch \
     --main_process_port 29504 \
     --config_file configs/a6000_config.yaml \
     src/experiments/lora_transform/lora_transform_trainer_v2.py \
-    --config_name=PQBA-llama3-8b-mistral-7b-v3-hellaswag-ptr_lr5e-4
+    --config_name=PQBA-llama3-8b-mistral-7b-v3-hellaswag-lr5e-4
 """
 
 import logging
@@ -53,6 +53,7 @@ from src.experiments.pretrain_tasks.input_preprocess import (
 )
 
 logger = logging.getLogger(__name__)
+os.environ["WANDB_PROJECT"]="LoRA-Transfer"
 
 FLAGS = flags.FLAGS
 
@@ -71,6 +72,8 @@ def load_PQBA_transform_configs():
         ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "h100"],
         ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "h100"],
         ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v3", "h100"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v4", "h100"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v5", "h100"],
     ]
     for source_model, target_model, task_set_id, server_cfg in config_params:
         src_ = os.path.basename(source_model)
@@ -94,7 +97,7 @@ def load_PQBA_transform_configs():
         data_args = dict(
             training_task=task_set_id,
         )
-        recipe_names = ["ptr_default", "ptr_lr5e-5", "ptr_lr1e-4", "ptr_lr5e-4", "test"]
+        recipe_names = ["default", "lr5e-5", "lr1e-4", "lr5e-4", "test"]
         for recipe_name in recipe_names:
             sft_training_args = TRAINING_RECIPE[server_cfg][recipe_name]
             if sft_training_args is None:
@@ -123,6 +126,9 @@ def load_PQBAST_transform_configs():
         ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "a6000"],
         ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "h100"],
         ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "h100"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v3", "h100"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v4", "h100"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v5", "h100"],
     ]
     for source_model, target_model, task_set_id, server_cfg in config_params:
         src_ = os.path.basename(source_model)
@@ -146,7 +152,9 @@ def load_PQBAST_transform_configs():
         data_args = dict(
             training_task=task_set_id,
         )
-        recipe_names = ["ptr_default", "ptr_lr5e-5", "ptr_lr1e-4", "ptr_lr5e-4", "test"]
+        recipe_names = [
+            "default", "lr5e-5", "lr1e-4", "lr5e-4", "lr1e-4-bsz4", "lr1e-4-bsz4-epoch2", "test"
+        ]
         for recipe_name in recipe_names:
             sft_training_args = TRAINING_RECIPE[server_cfg][recipe_name]
             if sft_training_args is None:
@@ -172,8 +180,8 @@ def load_PQBAST_transform_configs():
 def named_trainer_configs():
     trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
 
-    multi_task_configs = load_PQBA_transform_configs()
-    trainer_configs.update(multi_task_configs)
+    # multi_task_configs = load_PQBA_transform_configs()
+    # trainer_configs.update(multi_task_configs)
 
     multi_task_PQBAST_configs = load_PQBAST_transform_configs()
     trainer_configs.update(multi_task_PQBAST_configs)
@@ -223,7 +231,7 @@ def main(argv):
     )
     training_tasks = TASKSET_ID_TO_TASKS[data_args["training_task"]]
     flan_v2_dataset = None
-    if data_args["training_task"] in ["v3"]:
+    if data_args["training_task"] in ["v3", "v4", "v5"]:
         flan_v2_dataset = datasets.load_from_disk(FLAN_PATH)
 
     all_train_datasets = []

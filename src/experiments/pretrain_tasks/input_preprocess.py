@@ -215,7 +215,22 @@ class PretrainingTaskPreprocessor():
             return_tensors=None,
         )["input_ids"]
         input_ids.append(self.eos_token_id)
-        labels = input_ids[:]
+
+        source_length = len(
+            self.tokenizer(
+                source_text,
+                add_special_tokens=False,
+                padding=False,
+                truncation=True,
+                return_tensors=None,
+            )["input_ids"]
+        )
+        # labels = input_ids[:]
+        labels = [-100] * source_length + input_ids[source_length:]
+        assert len(input_ids) == len(labels)
+        if len(input_ids) > self.max_len:
+            input_ids = input_ids[-self.max_len:]
+            labels = labels[-self.max_len:]
         return {
             "input_ids": input_ids,
             "labels": labels,
@@ -271,7 +286,7 @@ def get_dataset_and_preprocess_fn(
         dataset = load_flan_subset(flan_dataset=FLAN_dataset, taskname=task,)
         remove_columns = [
             "source", "target", "task_name", "task_source",
-            "template_type", "template_idx", "split",
+            "template_type", "template_idx",
         ]
         preprocess_fn = preprocessor.process_flan
 

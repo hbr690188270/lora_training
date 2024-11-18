@@ -19,6 +19,19 @@ def make_gsm8k_data():
     }
     return example
 
+def make_flan_data():
+    example = {
+        "source": (
+            "Weng earns $12 an hour for babysitting. Yesterday, she "
+            "just did 50 minutes of babysitting. How much did she earn?"
+        ),
+        "target": (
+            "Weng earns 12/60 = $0.2 per minute. Working 50 minutes, "
+            "she earned 0.2 x 50 = $10. #### 10"
+        )
+    }
+    return example
+
 def make_arc_data():
     example = {
         "question": (
@@ -204,4 +217,28 @@ class pretraining_processor_test(absltest.TestCase):
         print(input_ids)
         print(gt_tokenized_input_ids)
         assert input_ids == gt_tokenized_input_ids
+
+    def test_flanv2(self):
+        example = make_flan_data()
+        preprocessor = PretrainingTaskPreprocessor(
+            tokenizer=self.tokenizer,
+            max_len=2048,
+        )
+        input_ids = preprocessor.process_flan(example)["input_ids"]
+        gt_texts = (
+            "Weng earns $12 an hour for babysitting. Yesterday, she "
+            "just did 50 minutes of babysitting. How much did she earn? "
+            "Weng earns 12/60 = $0.2 per minute. Working 50 minutes, "
+            "she earned 0.2 x 50 = $10. #### 10"
+        )
+        gt_tokenized_input_ids = self.tokenizer(
+            gt_texts,
+            add_special_tokens=False,
+            padding=False,
+            truncation=True,
+            return_tensors=None,
+        )["input_ids"]
+        gt_tokenized_input_ids.append(self.tokenizer.eos_token_id)
+        assert input_ids == gt_tokenized_input_ids
+
 
