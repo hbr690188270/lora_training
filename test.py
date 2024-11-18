@@ -1,20 +1,23 @@
+from dataclasses import dataclass, field
 from typing import List
 
 import datasets
 import torch
 import torch.nn.functional as F
+from peft import LoraConfig
 from safetensors import safe_open
-from safetensors.torch import save_file
-from torch.utils.data import DataLoader, Dataset
 from transformers import (
     AutoModelForCausalLM,
-    LlamaForCausalLM,
-    BertForMaskedLM,
 )
 from yaml import safe_load
 
 from src.data_utils import load_flan_subset
 from src.experiments.lora_transform.train_utils import FLAN_PATH
+
+
+@dataclass
+class LoraConfigV2(LoraConfig):
+    transform_r_multiple: int = field(default=8, metadata={"help": "Lora attention dimension"})
 
 
 def load_lora_weights():
@@ -160,6 +163,10 @@ def test_train_recipe():
     tasks = TASKSET_ID_TO_TASKS["v3"]
     print(len(tasks))
 
+def test_lora_cfg():
+    cfg = LoraConfigV2()
+    print(cfg)
+
 def main():
     # lora_tensors = load_lora_weights()
     # for k,v in lora_tensors.items():
@@ -168,8 +175,9 @@ def main():
     # load_yaml()
     # compare_lora_transform()
     # torch_indexing()
-    test_flan()
+    # test_flan()
     # test_load_tokenizer()
+    test_lora_cfg()
 
 if __name__ == "__main__":
     main()

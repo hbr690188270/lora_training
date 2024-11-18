@@ -19,7 +19,7 @@ CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch \
 import logging
 import os
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Dict, Tuple
 
 import datasets
@@ -56,6 +56,10 @@ logger = logging.getLogger(__name__)
 os.environ["WANDB_PROJECT"]="LoRA-Transfer"
 
 FLAGS = flags.FLAGS
+
+@dataclass
+class LoraConfigV2(LoraConfig):
+    pass
 
 def set_flags():
     flags.DEFINE_string(
