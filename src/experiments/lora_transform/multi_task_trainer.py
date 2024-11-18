@@ -300,7 +300,7 @@ def main(argv):
             param.requires_grad_(True)
     model.print_trainable_parameters()
 
-    training_args.eval_on_start = False
+    # training_args.eval_on_start = False
     trainer = Trainer(
         model=model,
         args=training_args,
