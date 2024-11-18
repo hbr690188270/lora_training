@@ -230,6 +230,8 @@ def main(argv):
         tokenizer=tokenizer,
     )
     training_tasks = TASKSET_ID_TO_TASKS[data_args["training_task"]]
+    extra_eval_tasks = TASKSET_ID_TO_TASKS["v1"] + TASKSET_ID_TO_TASKS["v2"]
+    all_tasks = training_tasks + extra_eval_tasks
     flan_v2_dataset = None
     if data_args["training_task"] in ["v3", "v4", "v5"]:
         flan_v2_dataset = datasets.load_from_disk(FLAN_PATH)
@@ -237,7 +239,8 @@ def main(argv):
     all_train_datasets = []
     all_valid_datasets = []
     all_test_datasets = []
-    for task in training_tasks:
+    # for task in training_tasks:
+    for task in all_tasks:
         dataset, preprocess_fn, remove_columns = get_dataset_and_preprocess_fn(
             task=task,
             preprocessor=preprocessor,
@@ -264,7 +267,8 @@ def main(argv):
             np.arange(int(num_examples * 0.95), num_examples,)
         )
 
-        all_train_datasets.append(train_dataset)
+        if task in training_tasks:
+            all_train_datasets.append(train_dataset)
         all_valid_datasets.append(eval_dataset)
         all_test_datasets.append(test_dataset)
 
@@ -282,10 +286,10 @@ def main(argv):
         stopping_strategy="all_exhausted",
     )
     eval_dataset = datasets.DatasetDict(
-        {training_tasks[idx]: all_valid_datasets[idx] for idx in range(len(training_tasks))}
+        {all_tasks[idx]: all_valid_datasets[idx] for idx in range(len(all_tasks))}
     )
     test_dataset = datasets.DatasetDict(
-        {training_tasks[idx]: all_test_datasets[idx] for idx in range(len(training_tasks))}
+        {all_tasks[idx]: all_test_datasets[idx] for idx in range(len(all_tasks))}
     )
     # eval_dataset = datasets.concatenate_datasets(all_valid_datasets)
     # test_dataset = datasets.concatenate_datasets(all_test_datasets)
@@ -325,7 +329,8 @@ def main(argv):
         raise NotImplementedError()
 
     src_ = os.path.basename(model_args["source_model"])
-    for task in training_tasks:
+    # for task in training_tasks:
+    for task in all_tasks:
         model.add_adapter(adapter_name=task, peft_config=peft_config)
         source_lora_path = f"ckpt/ptr/{src_}-{task}"
         print(f"loading adapters from {source_lora_path}")
@@ -336,7 +341,7 @@ def main(argv):
             param.requires_grad_(True)
     model.print_trainable_parameters()
 
-    training_args.eval_on_start = False
+    # training_args.eval_on_start = False
     trainer = Trainer(
         model=model,
         args=training_args,

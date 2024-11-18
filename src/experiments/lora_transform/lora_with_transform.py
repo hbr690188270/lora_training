@@ -883,6 +883,7 @@ class LoraWithPQBASTTransform(LoraModel):
             yield
             return
 
+        # Bairu: comment the following code to allow multi-task lora training.
         # if self.training:
         #     raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
 
