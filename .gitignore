@@ -9,7 +9,6 @@ model_cache/
 dataset_cache/
 wandb/
 
-test.py
 generations/
 launch_scripts/
 logs/
