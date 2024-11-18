@@ -15,9 +15,22 @@ from src.data_utils import load_flan_subset
 from src.experiments.lora_transform.train_utils import FLAN_PATH
 
 
+COMMON_MODEL_ARGS = dict(
+    torch_dtype=torch.bfloat16,
+    use_peft=True,
+    trust_remote_code=True,
+    use_flash_attention_2=True,
+    lora_r=64,
+    lora_alpha=128,
+    lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    lora_modules_to_save=None,
+    lora_transform_type="PQBAST",
+    lora_dropout=0.05,
+)
+
 @dataclass
 class LoraConfigV2(LoraConfig):
-    transform_r_multiple: int = field(default=8, metadata={"help": "Lora attention dimension"})
+    transform_r_multiple: int = field(default=1, metadata={"help": "Lora attention dimension"})
 
 
 def load_lora_weights():
@@ -167,6 +180,13 @@ def test_lora_cfg():
     cfg = LoraConfigV2()
     print(cfg)
 
+def test_dict():
+    cfgs = dict(
+        a="a",
+        **COMMON_MODEL_ARGS
+    )
+    print(cfgs)
+
 def main():
     # lora_tensors = load_lora_weights()
     # for k,v in lora_tensors.items():
@@ -177,7 +197,8 @@ def main():
     # torch_indexing()
     # test_flan()
     # test_load_tokenizer()
-    test_lora_cfg()
+    # test_lora_cfg()
+    test_dict()
 
 if __name__ == "__main__":
     main()

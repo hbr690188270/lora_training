@@ -16,10 +16,11 @@ CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch \
     --config_name=PQBA-llama3-8b-mistral-7b-v3-hellaswag-lr5e-4
 """
 
+import itertools
 import logging
 import os
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Dict, Tuple
 
 import datasets
@@ -59,7 +60,7 @@ FLAGS = flags.FLAGS
 
 @dataclass
 class LoraConfigV2(LoraConfig):
-    pass
+    transform_r_multiple: int = field(default=1, metadata={"help": "Lora attention dimension"})
 
 def set_flags():
     flags.DEFINE_string(
@@ -68,97 +69,52 @@ def set_flags():
         help="Name of the trainer config. Must be defined in `named_trainer_configs()` function",
     )
 
-def load_PQBA_transform_configs():
-    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
-    config_params = [
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "a6000"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "a6000"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "h100"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "h100"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v3", "h100"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v4", "h100"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v5", "h100"],
-    ]
-    for source_model, target_model, task_set_id, server_cfg in config_params:
-        src_ = os.path.basename(source_model)
-        tgt_ = os.path.basename(target_model)
-        if source_model == target_model:
-            continue
-        model_args = dict(
-            source_model=source_model,
-            target_model=target_model,
-            torch_dtype=torch.bfloat16,
-            use_peft=True,
-            trust_remote_code=True,
-            use_flash_attention_2=True,
-            lora_r=64,
-            lora_alpha=128,
-            lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-            lora_modules_to_save=None,
-            lora_transform_type="PQBA",
-            lora_dropout=0.05,
-        )
-        data_args = dict(
-            training_task=task_set_id,
-        )
-        recipe_names = ["default", "lr5e-5", "lr1e-4", "lr5e-4", "test"]
-        for recipe_name in recipe_names:
-            sft_training_args = TRAINING_RECIPE[server_cfg][recipe_name]
-            if sft_training_args is None:
-                continue
-            output_dir = (
-                f"ckpt/PQBA_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
-            )
-            run_name = (
-                f"ckpt/PQBA_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
-            )
-            sft_training_args = replace(
-                sft_training_args,
-                output_dir=output_dir,
-                run_name=run_name,
-            )
-            cfg_name = (
-                f"PQBA-{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
-            )
-            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
-    return trainer_configs
+COMMON_MODEL_ARGS = dict(
+    torch_dtype=torch.bfloat16,
+    use_peft=True,
+    trust_remote_code=True,
+    use_flash_attention_2=True,
+    lora_r=64,
+    lora_alpha=128,
+    lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    lora_modules_to_save=None,
+    lora_transform_type="PQBAST",
+    lora_dropout=0.05,
+)
 
 def load_PQBAST_transform_configs():
     trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    source_models = ["model_cache/llama3-8b"]
+    target_models = ["model_cache/mistral-7b-v3"]
+    task_sets = ["v1", "v2", "v3", "v4", "v5"]
+    servers = ["h100"]
+    transform_r_multiple_list = [1, 2]
     config_params = [
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "a6000"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "a6000"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "h100"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "h100"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v3", "h100"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v4", "h100"],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v5", "h100"],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "h100", 1],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "h100", 1],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v3", "h100", 1],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v4", "h100", 1],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v5", "h100", 1],
+        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v5", "h100", 2],
     ]
-    for source_model, target_model, task_set_id, server_cfg in config_params:
-        src_ = os.path.basename(source_model)
-        tgt_ = os.path.basename(target_model)
-        if source_model == target_model:
+    all_cfgs = itertools.product(
+        source_models, target_models, task_sets, servers, transform_r_multiple_list
+    )
+    for source, target, task_set_id, server_cfg, transform_r_multiple in all_cfgs:
+        src_ = os.path.basename(source)
+        tgt_ = os.path.basename(target)
+        if source == target:
             continue
         model_args = dict(
-            source_model=source_model,
-            target_model=target_model,
-            torch_dtype=torch.bfloat16,
-            use_peft=True,
-            trust_remote_code=True,
-            use_flash_attention_2=True,
-            lora_r=64,
-            lora_alpha=128,
-            lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-            lora_modules_to_save=None,
-            lora_transform_type="PQBAST",
-            lora_dropout=0.05,
+            source_model=source,
+            target_model=target,
+            transform_r_multiple=transform_r_multiple,
+            **COMMON_MODEL_ARGS,
         )
         data_args = dict(
             training_task=task_set_id,
         )
-        recipe_names = [
-            "default", "lr5e-5", "lr1e-4", "lr5e-4", "lr1e-4-bsz4", "lr1e-4-bsz4-epoch2", "test"
-        ]
+        recipe_names = ["lr1e-4-bsz4-epoch2"]
         for recipe_name in recipe_names:
             sft_training_args = TRAINING_RECIPE[server_cfg][recipe_name]
             if sft_training_args is None:
@@ -177,6 +133,9 @@ def load_PQBAST_transform_configs():
             cfg_name = (
                 f"PQBAST-{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
             )
+            if transform_r_multiple != 1:
+                cfg_name += f"-rmultiple{transform_r_multiple}"
+
             trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
     return trainer_configs
 
@@ -312,7 +271,8 @@ def main(argv):
 
     model = AutoModelForCausalLM.from_pretrained(model_args["target_model"], **model_kwargs)
     # model = CustomMistral.from_pretrained(model_args["target_model"], **model_kwargs)
-    peft_config = LoraConfig(
+    # peft_config = LoraConfig(
+    peft_config = LoraConfigV2(
         r=model_args["lora_r"],
         lora_alpha=model_args["lora_alpha"],
         lora_dropout=model_args["lora_dropout"],
@@ -320,6 +280,7 @@ def main(argv):
         task_type="CAUSAL_LM",
         target_modules=model_args["lora_target_modules"],
         modules_to_save=model_args["lora_modules_to_save"],
+        transform_r_multiple=model_args["transform_r_multiple"],
     )
 
     # Load the fine-tuned LoRA from LLaMA3

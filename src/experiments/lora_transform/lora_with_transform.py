@@ -326,6 +326,7 @@ class PQBASTLinear(nn.Module, lora_layer.LoraLayer):
         self,
         base_layer,
         adapter_name: str,
+        transform_r_multiple: int = 1,
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
@@ -351,10 +352,11 @@ class PQBASTLinear(nn.Module, lora_layer.LoraLayer):
             use_dora=use_dora,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.lora_transform_matrix_default_p = nn.Linear(r, self.out_features, bias=False)
-        self.lora_transform_matrix_default_q = nn.Linear(self.out_features, r, bias=False)
-        self.lora_transform_matrix_default_s = nn.Linear(r, self.in_features, bias=False)
-        self.lora_transform_matrix_default_t = nn.Linear(self.in_features, r, bias=False)
+        transform_r = transform_r_multiple * r
+        self.lora_transform_matrix_default_p = nn.Linear(transform_r, self.out_features, bias=False)
+        self.lora_transform_matrix_default_q = nn.Linear(self.out_features, transform_r, bias=False)
+        self.lora_transform_matrix_default_s = nn.Linear(transform_r, self.in_features, bias=False)
+        self.lora_transform_matrix_default_t = nn.Linear(self.in_features, transform_r, bias=False)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -571,7 +573,10 @@ def dispatch_PQBAST_transform_lora(
             )
             kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
         kwargs.update(lora_config.loftq_config)
-        new_module = PQBASTLinear(target, adapter_name, **kwargs)
+        transform_r_multiple = lora_config.transform_r_multiple
+        new_module = PQBASTLinear(
+            target, adapter_name, transform_r_multiple=transform_r_multiple, **kwargs
+        )
     elif isinstance(target_base_layer, Conv1D):
         raise NotImplementedError()
 
