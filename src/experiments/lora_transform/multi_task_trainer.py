@@ -89,14 +89,6 @@ def load_PQBAST_transform_configs():
     task_sets = ["v1", "v2", "v3", "v4", "v5"]
     servers = ["h100"]
     transform_r_multiple_list = [1, 2]
-    config_params = [
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v1", "h100", 1],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v2", "h100", 1],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v3", "h100", 1],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v4", "h100", 1],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v5", "h100", 1],
-        ["model_cache/llama3-8b", "model_cache/mistral-7b-v3", "v5", "h100", 2],
-    ]
     all_cfgs = itertools.product(
         source_models, target_models, task_sets, servers, transform_r_multiple_list
     )
@@ -121,9 +113,11 @@ def load_PQBAST_transform_configs():
                 continue
             output_dir = (
                 f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
+                f"-rmultiple{transform_r_multiple}"
             )
             run_name = (
                 f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
+                f"-rmultiple{transform_r_multiple}"
             )
             sft_training_args = replace(
                 sft_training_args,
@@ -306,7 +300,7 @@ def main(argv):
             param.requires_grad_(True)
     model.print_trainable_parameters()
 
-    # training_args.eval_on_start = False
+    training_args.eval_on_start = False
     trainer = Trainer(
         model=model,
         args=training_args,
