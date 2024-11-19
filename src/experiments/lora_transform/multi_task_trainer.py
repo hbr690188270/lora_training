@@ -112,11 +112,11 @@ def load_PQBAST_transform_configs():
             if sft_training_args is None:
                 continue
             output_dir = (
-                f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
+                f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
                 f"-rmultiple{transform_r_multiple}"
             )
             run_name = (
-                f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}/"
+                f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
                 f"-rmultiple{transform_r_multiple}"
             )
             sft_training_args = replace(
