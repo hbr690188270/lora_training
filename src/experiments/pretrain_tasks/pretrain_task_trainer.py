@@ -5,7 +5,8 @@ To view all available configs, run:
 ```
 import src.experiments.pretrain_tasks.pretrain_task_trainer as sp
 configs = sp.named_trainer_configs()
-print(configs)
+for key in configs.keys():
+    print(key)
 ```
 
 CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info \
@@ -15,10 +16,12 @@ CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info \
 
 """
 
+import itertools
 import logging
 import os
 import sys
 from dataclasses import replace
+from typing import Dict, Tuple
 
 import datasets
 import numpy as np
@@ -31,6 +34,7 @@ from transformers import AutoModelForCausalLM, Trainer, set_seed
 from src.cmd_parser import (
     DataArguments,
     ModelArguments,
+    SFTConfig,
 )
 from src.data_utils import (
     DataCollatorForInstructLM,
@@ -60,48 +64,53 @@ def set_flags():
     )
 
 
-def load_pretraining_tasks_configs():
+def load_pretraining_tasks_configs()->Dict[str, Tuple[ModelArguments, DataArguments, SFTConfig]]:
     trainer_configs = {}
-    for model_path in [
-        # "model_cache/llama3-8b", "model_cache/llama3_1-8b", "model_cache/mistral-7b-v3"
-        "model_cache/llama3-8b", "model_cache/mistral-7b-v3",
-    ]:
+    # models = ["model_cache/llama3-8b", "model_cache/mistral-7b-v3"]
+    models = ["model_cache/llama3-8b"]
+    pretrain_pcts = [0, 30]
+    all_cfgs = itertools.product(models, pretrain_pcts, INDEX_TO_DATASET)
+    # all_cfgs = itertools.product(models, pretrain_pcts, INDEX_TO_DATASET[:30])
+    for model_path, ptr_pct, taskname in all_cfgs:
         model_name_for_shot = os.path.basename(model_path)
-        for taskname in INDEX_TO_DATASET:
-            model_args = ModelArguments(
-                model_name_or_path=model_path,
-                torch_dtype=torch.bfloat16,
-                use_peft=True,
-                trust_remote_code=True,
-                use_flash_attention_2=True,
-                lora_r=64,
-                lora_alpha=128,
-                lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-                lora_modules_to_save=None,
-            )
-            data_args = DataArguments(
-                dataset_name=taskname,
-            )
-            sft_training_args = h100_lr25_short_seq_train_config
-            output_dir = (
-                f"ckpt/ptr/{model_name_for_shot}-{taskname}"
-            )
-            run_name = (
-                f"ptr-{model_name_for_shot}-{taskname}"
-            )
-            sft_training_args = replace(
-                sft_training_args,
-                output_dir=output_dir,
-                run_name=run_name,
-            )
+        model_args = ModelArguments(
+            model_name_or_path=model_path,
+            torch_dtype=torch.bfloat16,
+            use_peft=True,
+            trust_remote_code=True,
+            use_flash_attention_2=True,
+            lora_r=64,
+            lora_alpha=128,
+            lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            lora_modules_to_save=None,
+        )
+        data_args = DataArguments(
+            dataset_name=taskname,
+            ptr_pct=ptr_pct,
+        )
+        sft_training_args = h100_lr25_short_seq_train_config
+        output_dir = (
+            f"ckpt/ptr/{model_name_for_shot}-{taskname}"
+        )
+        run_name = (
+            f"ptr-{model_name_for_shot}-{taskname}"
+        )
+        if ptr_pct != 0:
+            output_dir += f"-ptr{ptr_pct}"
+            run_name += f"-ptr{ptr_pct}"
+        sft_training_args = replace(
+            sft_training_args,
+            output_dir=output_dir,
+            run_name=run_name,
+        )
 
-            cfg_name = f"ptr-{model_name_for_shot}-{taskname}"
-            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
+        cfg_name = f"ptr-{model_name_for_shot}-{taskname}-ptr{ptr_pct}"
+        trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
 
     return trainer_configs
 
 
-def named_trainer_configs():
+def named_trainer_configs()->Dict[str, Tuple[ModelArguments, DataArguments, SFTConfig]]:
     trainer_configs = {}
     pretraining_configs = load_pretraining_tasks_configs()
     trainer_configs.update(pretraining_configs)
@@ -157,7 +166,7 @@ def main(argv):
         tokenizer=tokenizer,
     )
     flan_v2_dataset = None
-    flan_tasks = TASKSET_ID_TO_TASKS["v3"] + TASKSET_ID_TO_TASKS["v4"] + TASKSET_ID_TO_TASKS["v5"]
+    flan_tasks = TASKSET_ID_TO_TASKS["v6"] + TASKSET_ID_TO_TASKS["v5"]
     if data_args.dataset_name in flan_tasks:
         flan_v2_dataset = datasets.load_from_disk(FLAN_PATH)
     dataset, preprocess_fn, remove_columns = get_dataset_and_preprocess_fn(
@@ -165,13 +174,68 @@ def main(argv):
         preprocessor=preprocessor,
         FLAN_dataset=flan_v2_dataset,
     )
-
     dataset = dataset.map(
         preprocess_fn,
         num_proc=32,
         remove_columns=remove_columns,
         batched=False,
     )
+    np.random.seed(222)
+    num_examples = len(dataset)
+    rand_indices = np.random.permutation(num_examples)
+    dataset = dataset.select(rand_indices)
+    train_dataset = dataset.select(np.arange(int(num_examples * 0.9)))
+    eval_dataset = dataset.select(
+        np.arange(int(num_examples * 0.9), int(num_examples * 0.95)),
+    )
+    test_dataset = dataset.select(
+        np.arange(int(num_examples * 0.95), num_examples,)
+    )
+    if data_args.ptr_pct > 0:
+        ptr_dataset, ptr_preprocess_fn, ptr_remove_columns = get_dataset_and_preprocess_fn(
+            task="pretrain",
+            preprocessor=preprocessor,
+        )
+        ptr_dataset = ptr_dataset.map(
+            ptr_preprocess_fn,
+            num_proc=32,
+            remove_columns=ptr_remove_columns,
+            batched=False,
+        )
+        np.random.seed(222)
+        num_examples = len(ptr_dataset)
+        rand_indices = np.random.permutation(num_examples)
+        ptr_dataset = ptr_dataset.select(rand_indices)
+        train_ptr_dataset = ptr_dataset.select(np.arange(int(num_examples * 0.9)))
+        eval_ptr_dataset = ptr_dataset.select(
+            np.arange(int(num_examples * 0.9), int(num_examples * 0.905)),
+        )
+        test_ptr_dataset = ptr_dataset.select(
+            np.arange(int(num_examples * 0.995), num_examples,)
+        )
+
+        probabilities = np.array([100 - data_args.ptr_pct, data_args.ptr_pct])
+        probabilities = probabilities / np.sum(probabilities)
+        train_dataset = datasets.interleave_datasets(
+            [train_dataset, train_ptr_dataset],
+            probabilities=probabilities,
+            seed=training_args.seed,
+            stopping_strategy="first_exhausted",
+        )
+
+        eval_dataset = datasets.DatasetDict(
+            {
+                data_args.dataset_name: eval_dataset,
+                "pretrain": eval_ptr_dataset,
+            }
+        )
+        test_dataset = datasets.DatasetDict(
+            {
+                data_args.dataset_name: test_dataset,
+                "pretrain": test_ptr_dataset,
+            }
+        )
+
 
     logger.info("*** Load pretrained model ***")
 
@@ -199,18 +263,6 @@ def main(argv):
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
-    np.random.seed(222)
-    num_examples = len(dataset)
-    rand_indices = np.random.permutation(num_examples)
-    dataset = dataset.select(rand_indices)
-    # dataset = dataset.shuffle()
-    train_dataset = dataset.select(np.arange(int(num_examples * 0.9)))
-    eval_dataset = dataset.select(
-        np.arange(int(num_examples * 0.9), int(num_examples * 0.95)),
-    )
-    test_dataset = dataset.select(
-        np.arange(int(num_examples * 0.95), num_examples,)
-    )
     print(train_dataset)
     print(eval_dataset)
     print(test_dataset)

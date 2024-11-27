@@ -277,6 +277,9 @@ class DataArguments:
             )
         },
     )
+    ptr_pct: float = field(
+        default=0.0
+    )
 
 @dataclass
 class SFTConfig(transformers.TrainingArguments):

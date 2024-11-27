@@ -6,7 +6,8 @@ To view all available configs, run:
 ```
 import src.experiments.lora_transform.multi_task_trainer as mt
 configs = mt.named_trainer_configs()
-print(configs.keys())
+for key in configs.keys():
+    print(key)
 ```
 
 CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch \
@@ -19,6 +20,7 @@ CUDA_VISIBLE_DEVICES=3,4,5,6 ACCELERATE_LOG_LEVEL=info accelerate launch \
 import itertools
 import logging
 import os
+import random
 import sys
 from dataclasses import dataclass, field, replace
 from typing import Dict, Tuple
@@ -39,7 +41,9 @@ from src.data_utils import (
     get_tokenizer,
 )
 from src.experiments.lora_transform.lora_transform_model import (
+    FullRankLoraModel,
     PQBALoraModel,
+    PQBASTEFLoraModel,
     PQBASTLoraModel,
 )
 from src.experiments.lora_transform.train_utils import (
@@ -86,13 +90,14 @@ def load_PQBAST_transform_configs():
     trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
     source_models = ["model_cache/llama3-8b"]
     target_models = ["model_cache/mistral-7b-v3"]
-    task_sets = ["v1", "v2", "v3", "v4", "v5"]
+    task_sets = ["v1", "v2", "v3", "v3_1", "v4", "v5", "v6"]
     servers = ["h100"]
     transform_r_multiple_list = [1, 2]
+    pretrain_pcts = [0, 30]
     all_cfgs = itertools.product(
-        source_models, target_models, task_sets, servers, transform_r_multiple_list
+        source_models, target_models, task_sets, servers, transform_r_multiple_list, pretrain_pcts
     )
-    for source, target, task_set_id, server_cfg, transform_r_multiple in all_cfgs:
+    for source, target, task_set_id, server_cfg, transform_r_multiple, ptr_pct in all_cfgs:
         src_ = os.path.basename(source)
         tgt_ = os.path.basename(target)
         if source == target:
@@ -105,6 +110,7 @@ def load_PQBAST_transform_configs():
         )
         data_args = dict(
             training_task=task_set_id,
+            ptr_pct=ptr_pct,
         )
         recipe_names = ["lr1e-4-bsz4-epoch2"]
         for recipe_name in recipe_names:
@@ -113,11 +119,11 @@ def load_PQBAST_transform_configs():
                 continue
             output_dir = (
                 f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
-                f"-rmultiple{transform_r_multiple}"
+                f"-rmultiple{transform_r_multiple}-ptr_pct{ptr_pct}"
             )
             run_name = (
-                f"ckpt/PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
-                f"-rmultiple{transform_r_multiple}"
+                f"PQBAST_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+                f"-rmultiple{transform_r_multiple}-ptr_pct{ptr_pct}"
             )
             sft_training_args = replace(
                 sft_training_args,
@@ -129,6 +135,120 @@ def load_PQBAST_transform_configs():
             )
             if transform_r_multiple != 1:
                 cfg_name += f"-rmultiple{transform_r_multiple}"
+            if ptr_pct > 0:
+                cfg_name += f"-ptr_pct{ptr_pct}"
+
+            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
+    return trainer_configs
+
+def load_PQBASTEF_transform_configs():
+    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    source_models = ["model_cache/llama3-8b"]
+    target_models = ["model_cache/mistral-7b-v3"]
+    task_sets = ["v3",]
+    servers = ["h100"]
+    transform_r_multiple_list = [1]
+    pretrain_pcts = [0]
+    all_cfgs = itertools.product(
+        source_models, target_models, task_sets, servers, transform_r_multiple_list, pretrain_pcts
+    )
+    for source, target, task_set_id, server_cfg, transform_r_multiple, ptr_pct in all_cfgs:
+        src_ = os.path.basename(source)
+        tgt_ = os.path.basename(target)
+        if source == target:
+            continue
+        model_args = dict(
+            source_model=source,
+            target_model=target,
+            transform_r_multiple=transform_r_multiple,
+            **COMMON_MODEL_ARGS,
+        )
+        model_args["lora_transform_type"] = "PQBASTEF"
+        data_args = dict(
+            training_task=task_set_id,
+            ptr_pct=ptr_pct,
+        )
+        recipe_names = ["lr1e-4-bsz4-epoch2"]
+        for recipe_name in recipe_names:
+            sft_training_args = TRAINING_RECIPE[server_cfg][recipe_name]
+            if sft_training_args is None:
+                continue
+            output_dir = (
+                f"ckpt/PQBASTEF_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+                f"-rmultiple{transform_r_multiple}-ptr_pct{ptr_pct}"
+            )
+            run_name = (
+                f"PQBASTEF_transform/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+                f"-rmultiple{transform_r_multiple}-ptr_pct{ptr_pct}"
+            )
+            sft_training_args = replace(
+                sft_training_args,
+                output_dir=output_dir,
+                run_name=run_name,
+            )
+            cfg_name = (
+                f"PQBASTEF-{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+            )
+            if transform_r_multiple != 1:
+                cfg_name += f"-rmultiple{transform_r_multiple}"
+            if ptr_pct > 0:
+                cfg_name += f"-ptr_pct{ptr_pct}"
+
+            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
+    return trainer_configs
+
+def load_full_rank_transform_configs():
+    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    source_models = ["model_cache/llama3-8b"]
+    target_models = ["model_cache/mistral-7b-v3"]
+    task_sets = ["v3",]
+    servers = ["h100"]
+    transform_r_multiple_list = [1]
+    pretrain_pcts = [0, 30]
+    all_cfgs = itertools.product(
+        source_models, target_models, task_sets, servers, transform_r_multiple_list, pretrain_pcts
+    )
+    for source, target, task_set_id, server_cfg, transform_r_multiple, ptr_pct in all_cfgs:
+        src_ = os.path.basename(source)
+        tgt_ = os.path.basename(target)
+        if source == target:
+            continue
+        model_args = dict(
+            source_model=source,
+            target_model=target,
+            transform_r_multiple=transform_r_multiple,
+            **COMMON_MODEL_ARGS,
+        )
+        model_args["lora_transform_type"] = "full_rank"
+        data_args = dict(
+            training_task=task_set_id,
+            ptr_pct=ptr_pct,
+        )
+        recipe_names = ["lr1e-4-bsz4-epoch2", "lr2e-5-bsz4-epoch2"]
+        for recipe_name in recipe_names:
+            sft_training_args = TRAINING_RECIPE[server_cfg][recipe_name]
+            if sft_training_args is None:
+                continue
+            output_dir = (
+                f"ckpt/fullrank/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+                f"-rmultiple{transform_r_multiple}-ptr_pct{ptr_pct}"
+            )
+            run_name = (
+                f"fullrank/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+                f"-rmultiple{transform_r_multiple}-ptr_pct{ptr_pct}"
+            )
+            sft_training_args = replace(
+                sft_training_args,
+                output_dir=output_dir,
+                run_name=run_name,
+            )
+            cfg_name = (
+                f"fullrank-{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+            )
+            if transform_r_multiple != 1:
+                cfg_name += f"-rmultiple{transform_r_multiple}"
+            if ptr_pct > 0:
+                cfg_name += f"-ptr_pct{ptr_pct}"
 
             trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
     return trainer_configs
@@ -142,6 +262,12 @@ def named_trainer_configs():
 
     multi_task_PQBAST_configs = load_PQBAST_transform_configs()
     trainer_configs.update(multi_task_PQBAST_configs)
+
+    multi_task_PQBASTEF_configs = load_PQBASTEF_transform_configs()
+    trainer_configs.update(multi_task_PQBASTEF_configs)
+
+    full_rank_configs = load_full_rank_transform_configs()
+    trainer_configs.update(full_rank_configs)
 
     return trainer_configs
 
@@ -190,7 +316,7 @@ def main(argv):
     extra_eval_tasks = TASKSET_ID_TO_TASKS["v1"] + TASKSET_ID_TO_TASKS["v2"]
     all_tasks = training_tasks + extra_eval_tasks
     flan_v2_dataset = None
-    if data_args["training_task"] in ["v3", "v4", "v5"]:
+    if data_args["training_task"] in ["v3", "v4", "v5", "v6", "v3_1"]:
         flan_v2_dataset = datasets.load_from_disk(FLAN_PATH)
 
     all_train_datasets = []
@@ -248,6 +374,53 @@ def main(argv):
     test_dataset = datasets.DatasetDict(
         {all_tasks[idx]: all_test_datasets[idx] for idx in range(len(all_tasks))}
     )
+    if data_args["ptr_pct"] > 0:
+        ptr_dataset, ptr_preprocess_fn, ptr_remove_columns = get_dataset_and_preprocess_fn(
+            task="pretrain",
+            preprocessor=preprocessor,
+        )
+        ptr_dataset = ptr_dataset.map(
+            ptr_preprocess_fn,
+            num_proc=32,
+            remove_columns=ptr_remove_columns,
+            batched=False,
+        )
+        train_task_ids = [DATASET_TO_INDEX[x] for x in training_tasks]
+        pseduo_task_ids_for_ptr = random.choices(train_task_ids, k = len(ptr_dataset))
+        ptr_dataset = ptr_dataset.add_column("dataset_index", pseduo_task_ids_for_ptr)
+        np.random.seed(222)
+        num_examples = len(ptr_dataset)
+        rand_indices = np.random.permutation(num_examples)
+        ptr_dataset = ptr_dataset.select(rand_indices)
+        train_ptr_dataset = ptr_dataset.select(np.arange(int(num_examples * 0.9)))
+        eval_ptr_dataset = ptr_dataset.select(
+            np.arange(int(num_examples * 0.9), int(num_examples * 0.905)),
+        )
+        test_ptr_dataset = ptr_dataset.select(
+            np.arange(int(num_examples * 0.995), num_examples,)
+        )
+
+        probabilities = np.array([100 - data_args["ptr_pct"], data_args["ptr_pct"]])
+        probabilities = probabilities / np.sum(probabilities)
+        dataset = datasets.interleave_datasets(
+            [interleaved_dataset, train_ptr_dataset],
+            probabilities=probabilities,
+            seed=training_args.seed,
+            stopping_strategy="first_exhausted",
+        )
+
+        eval_dataset.update(
+            {
+                "pretrain": eval_ptr_dataset,
+            }
+        )
+        test_dataset.update(
+            {
+                "pretrain": test_ptr_dataset,
+            }
+        )
+
+
     # eval_dataset = datasets.concatenate_datasets(all_valid_datasets)
     # test_dataset = datasets.concatenate_datasets(all_test_datasets)
 
@@ -260,7 +433,7 @@ def main(argv):
         torch_dtype=torch_dtype,
         use_cache=True,
         device_map=None,
-        cache_dir='./model_cache'
+        cache_dir="./model_cache"
     )
 
     model = AutoModelForCausalLM.from_pretrained(model_args["target_model"], **model_kwargs)
@@ -284,6 +457,10 @@ def main(argv):
         model = PQBALoraModel(model, peft_config)
     elif model_args["lora_transform_type"] == "PQBAST":
         model = PQBASTLoraModel(model, peft_config)
+    elif model_args["lora_transform_type"] == "PQBASTEF":
+        model = PQBASTEFLoraModel(model, peft_config)
+    elif model_args["lora_transform_type"] == "full_rank":
+        model = FullRankLoraModel(model, peft_config)
     else:
         raise NotImplementedError()
 
@@ -291,7 +468,10 @@ def main(argv):
     # for task in training_tasks:
     for task in all_tasks:
         model.add_adapter(adapter_name=task, peft_config=peft_config)
-        source_lora_path = f"ckpt/ptr/{src_}-{task}"
+        if data_args["ptr_pct"] > 0:
+            source_lora_path = f"ckpt/ptr/{src_}-{task}-ptr{data_args['ptr_pct']}"
+        else:
+            source_lora_path = f"ckpt/ptr/{src_}-{task}"
         print(f"loading adapters from {source_lora_path}")
         model.load_adapter(source_lora_path, adapter_name=task)
     model.requires_grad_(False)

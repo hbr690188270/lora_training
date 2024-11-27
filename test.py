@@ -187,6 +187,13 @@ def test_dict():
     )
     print(cfgs)
 
+def test_fineweb():
+    from datasets import load_dataset
+    # use name="sample-10BT" to use the 10BT sample
+    fw = load_dataset("HuggingFaceFW/fineweb", name="sample-10BT", split="train", streaming=True)
+
+
+
 def main():
     # lora_tensors = load_lora_weights()
     # for k,v in lora_tensors.items():
@@ -195,10 +202,10 @@ def main():
     # load_yaml()
     # compare_lora_transform()
     # torch_indexing()
-    # test_flan()
+    test_flan()
     # test_load_tokenizer()
     # test_lora_cfg()
-    test_dict()
+    # test_dict()
 
 if __name__ == "__main__":
     main()

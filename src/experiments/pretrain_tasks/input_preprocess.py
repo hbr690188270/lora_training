@@ -236,10 +236,33 @@ class PretrainingTaskPreprocessor():
             "labels": labels,
         }
 
+    def process_fineweb(
+        self,
+        example: Dict[str, str],
+    ):
+        text = example["text"]
+        input_ids = self.tokenizer(
+            text,
+            add_special_tokens=False,
+            padding=False,
+            truncation=True,
+            return_tensors=None,
+        )["input_ids"]
+        input_ids.append(self.eos_token_id)
+        labels = input_ids[:]
+        if len(input_ids) > self.max_len:
+            input_ids = input_ids[-self.max_len:]
+            labels = labels[-self.max_len:]
+        return {
+            "input_ids": input_ids,
+            "labels": labels,
+        }
+
+
 def get_dataset_and_preprocess_fn(
     task: str,
     preprocessor: Optional[PretrainingTaskPreprocessor],
-    FLAN_dataset: Optional[datasets.Dataset],
+    FLAN_dataset: Optional[datasets.Dataset] = None,
 ):
     if task == "gsm8k":
         dataset = datasets.load_dataset("openai/gsm8k", "main", split="train")
@@ -280,6 +303,13 @@ def get_dataset_and_preprocess_fn(
         )
         preprocess_fn = preprocessor.process_winogrand
         remove_columns=["sentence", "option1", "option2", "answer"]
+    elif task == "pretrain":
+        dataset = datasets.load_from_disk("dataset_cache/fw_subset_500k/")
+        preprocess_fn = preprocessor.process_fineweb
+        remove_columns=[
+            "text", "id", "dump", "url", "date", "file_path",
+            "language", "language_score", "token_count",
+        ]
     # otherwise the task comes from FLAN_V2 and we use a unified preprocess fn
     else:
         assert FLAN_dataset is not None

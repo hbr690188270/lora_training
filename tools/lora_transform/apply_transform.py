@@ -17,6 +17,10 @@ import torch
 from absl import app, flags
 from safetensors import safe_open
 from safetensors.torch import save_file
+from transformers import AutoModelForCausalLM
+
+from src.experiments.lora_transform.lora_transform_model import PQBASTEFLoraModel
+from src.experiments.lora_transform.multi_task_trainer import LoraConfigV2
 
 FLAGS = flags.FLAGS
 
@@ -41,7 +45,7 @@ def set_flags():
     flags.DEFINE_enum(
         "transform_type",
         None,
-        ["BTA", "PQBA", "PQBA_m", "PQBAST"],
+        ["BTA", "PQBA", "PQBA_m", "PQBAST", "PQBASTEF"],
         help="Path to save the converted LoRA weights",
     )
 
@@ -120,30 +124,46 @@ def absorb_transform(
     return updated_tensor
 
 def main(argv):
-    transform_tensors = {}
-    with safe_open(FLAGS.adapter_path, framework="pt", device="cpu") as f:
-        for key in f.keys():
-            transform_tensors[key] = f.get_tensor(key)
-
-    source_tensors = {}
-    if FLAGS.source_path is None:
-        source_tensors = transform_tensors
+    # PQBAST + EF cannot be absorbed into by the original LoRA BA
+    # So we directly merge it into the full model
+    if FLAGS.transform_type == "PQBASTEF":
+        target_model = "model_cache/mistral-7b-v3"
+        model = AutoModelForCausalLM.from_pretrained(target_model, torch_dtype=torch.bfloat16)
+        loaded_kwarges = LoraConfigV2.from_json_file(
+            os.path.join(FLAGS.adapter_path, "adapter_config.json")
+        )
+        peft_config = LoraConfigV2(**loaded_kwarges)
+        print(peft_config)
+        model = PQBASTEFLoraModel(model, peft_config)
+        model.load_adapter(FLAGS.source_path, adapter_name="sft")
+        model.load_adapter(FLAGS.adapter_path, adapter_name="default")
+        merged_model = model.merge_and_unload(adapter_names=["sft"])
+        merged_model.save_pretrained(FLAGS.output_path)
     else:
-        with safe_open(FLAGS.source_path, framework="pt", device="cpu") as f:
+        transform_tensors = {}
+        with safe_open(FLAGS.adapter_path, framework="pt", device="cpu") as f:
             for key in f.keys():
-                source_tensors[key] = f.get_tensor(key)
+                transform_tensors[key] = f.get_tensor(key)
+        source_tensors = {}
+        if FLAGS.source_path is None:
+            source_tensors = transform_tensors
+        else:
+            with safe_open(FLAGS.source_path, framework="pt", device="cpu") as f:
+                for key in f.keys():
+                    source_tensors[key] = f.get_tensor(key)
+        updated_tensors = absorb_transform(transform_tensors, source_tensors)
 
-    updated_tensors = absorb_transform(transform_tensors, source_tensors)
+        if not os.path.exists(os.path.dirname(FLAGS.output_path)):
+            os.makedirs(os.path.dirname(FLAGS.output_path))
+        save_file(updated_tensors, FLAGS.output_path)
 
-    if not os.path.exists(os.path.dirname(FLAGS.output_path)):
-        os.makedirs(os.path.dirname(FLAGS.output_path))
-    save_file(updated_tensors, FLAGS.output_path)
-
-    adatper_dir = os.path.dirname(FLAGS.adapter_path)
-    adater_config_path = os.path.join(adatper_dir, "adapter_config.json")
-    output_dir = os.path.dirname(FLAGS.output_path)
-    output_config_path = os.path.join(output_dir, "adapter_config.json")
-    shutil.copy(adater_config_path, output_config_path)
+        # adatper_dir = os.path.dirname(FLAGS.adapter_path)
+        # adater_config_path = os.path.join(adatper_dir, "adapter_config.json")
+        adatper_dir = os.path.dirname(FLAGS.source_path)
+        adater_config_path = os.path.join(adatper_dir, "adapter_config.json")
+        output_dir = os.path.dirname(FLAGS.output_path)
+        output_config_path = os.path.join(output_dir, "adapter_config.json")
+        shutil.copy(adater_config_path, output_config_path)
 
 
 if __name__ == "__main__":
