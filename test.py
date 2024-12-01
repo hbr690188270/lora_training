@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from peft import LoraConfig
 from safetensors import safe_open
 from transformers import (
+    LlamaForCausalLM,
     AutoModelForCausalLM,
 )
 from yaml import safe_load

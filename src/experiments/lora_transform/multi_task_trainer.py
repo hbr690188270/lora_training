@@ -41,6 +41,7 @@ from src.data_utils import (
     get_tokenizer,
 )
 from src.experiments.lora_transform.lora_transform_model import (
+    FullRankBATLoraModel,
     FullRankLoraModel,
     PQBALoraModel,
     PQBASTEFLoraModel,
@@ -201,7 +202,7 @@ def load_full_rank_transform_configs():
     trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
     source_models = ["model_cache/llama3-8b"]
     target_models = ["model_cache/mistral-7b-v3"]
-    task_sets = ["v3",]
+    task_sets = ["v3", "v4"]
     servers = ["h100"]
     transform_r_multiple_list = [1]
     pretrain_pcts = [0, 30]
@@ -253,6 +254,62 @@ def load_full_rank_transform_configs():
             trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
     return trainer_configs
 
+def load_full_rank_BAT_transform_configs():
+    trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
+    source_models = ["model_cache/llama3-8b"]
+    target_models = ["model_cache/mistral-7b-v3"]
+    task_sets = ["v3", "v4"]
+    servers = ["h100"]
+    transform_r_multiple_list = [1]
+    pretrain_pcts = [0, 30]
+    all_cfgs = itertools.product(
+        source_models, target_models, task_sets, servers, transform_r_multiple_list, pretrain_pcts
+    )
+    for source, target, task_set_id, server_cfg, transform_r_multiple, ptr_pct in all_cfgs:
+        src_ = os.path.basename(source)
+        tgt_ = os.path.basename(target)
+        if source == target:
+            continue
+        model_args = dict(
+            source_model=source,
+            target_model=target,
+            transform_r_multiple=transform_r_multiple,
+            **COMMON_MODEL_ARGS,
+        )
+        model_args["lora_transform_type"] = "full_rank_BAT"
+        data_args = dict(
+            training_task=task_set_id,
+            ptr_pct=ptr_pct,
+        )
+        recipe_names = ["lr1e-4-bsz4-epoch2", "lr2e-5-bsz4-epoch2"]
+        for recipe_name in recipe_names:
+            sft_training_args = TRAINING_RECIPE[server_cfg][recipe_name]
+            if sft_training_args is None:
+                continue
+            output_dir = (
+                f"ckpt/fullrank_BAT/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+                f"-rmultiple{transform_r_multiple}-ptr_pct{ptr_pct}"
+            )
+            run_name = (
+                f"fullrank_BAT/{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+                f"-rmultiple{transform_r_multiple}-ptr_pct{ptr_pct}"
+            )
+            sft_training_args = replace(
+                sft_training_args,
+                output_dir=output_dir,
+                run_name=run_name,
+            )
+            cfg_name = (
+                f"fullrank-BAT-{src_}-{tgt_}-mt{task_set_id}-{recipe_name}-{server_cfg}"
+            )
+            if transform_r_multiple != 1:
+                cfg_name += f"-rmultiple{transform_r_multiple}"
+            if ptr_pct > 0:
+                cfg_name += f"-ptr_pct{ptr_pct}"
+
+            trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
+    return trainer_configs
+
 
 def named_trainer_configs():
     trainer_configs: Dict[str, Tuple[Dict, Dict, SFTConfig]] = {}
@@ -268,6 +325,9 @@ def named_trainer_configs():
 
     full_rank_configs = load_full_rank_transform_configs()
     trainer_configs.update(full_rank_configs)
+
+    full_rank_BAT_configs = load_full_rank_BAT_transform_configs()
+    trainer_configs.update(full_rank_BAT_configs)
 
     return trainer_configs
 
@@ -461,6 +521,8 @@ def main(argv):
         model = PQBASTEFLoraModel(model, peft_config)
     elif model_args["lora_transform_type"] == "full_rank":
         model = FullRankLoraModel(model, peft_config)
+    elif model_args["lora_transform_type"] == "full_rank_BAT":
+        model = FullRankBATLoraModel(model, peft_config)
     else:
         raise NotImplementedError()
 

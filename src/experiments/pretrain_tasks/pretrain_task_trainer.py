@@ -69,9 +69,10 @@ def load_pretraining_tasks_configs()->Dict[str, Tuple[ModelArguments, DataArgume
     # models = ["model_cache/llama3-8b", "model_cache/mistral-7b-v3"]
     models = ["model_cache/llama3-8b"]
     pretrain_pcts = [0, 30]
-    all_cfgs = itertools.product(models, pretrain_pcts, INDEX_TO_DATASET)
-    # all_cfgs = itertools.product(models, pretrain_pcts, INDEX_TO_DATASET[:30])
-    for model_path, ptr_pct, taskname in all_cfgs:
+    lora_ranks = [64, 512]
+    # all_cfgs = itertools.product(models, pretrain_pcts, INDEX_TO_DATASET)
+    all_cfgs = itertools.product(models, pretrain_pcts, INDEX_TO_DATASET[:30], lora_ranks)
+    for model_path, ptr_pct, taskname, lora_r in all_cfgs:
         model_name_for_shot = os.path.basename(model_path)
         model_args = ModelArguments(
             model_name_or_path=model_path,
@@ -79,7 +80,7 @@ def load_pretraining_tasks_configs()->Dict[str, Tuple[ModelArguments, DataArgume
             use_peft=True,
             trust_remote_code=True,
             use_flash_attention_2=True,
-            lora_r=64,
+            lora_r=lora_r,
             lora_alpha=128,
             lora_target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
             lora_modules_to_save=None,
@@ -98,13 +99,17 @@ def load_pretraining_tasks_configs()->Dict[str, Tuple[ModelArguments, DataArgume
         if ptr_pct != 0:
             output_dir += f"-ptr{ptr_pct}"
             run_name += f"-ptr{ptr_pct}"
+        if lora_r != 64:
+            output_dir += f"-lora{ptr_pct}"
+            run_name += f"-lora{ptr_pct}"
+
         sft_training_args = replace(
             sft_training_args,
             output_dir=output_dir,
             run_name=run_name,
         )
 
-        cfg_name = f"ptr-{model_name_for_shot}-{taskname}-ptr{ptr_pct}"
+        cfg_name = f"ptr-{model_name_for_shot}-{taskname}-ptr{ptr_pct}-lora{lora_r}"
         trainer_configs[cfg_name] = (model_args, data_args, sft_training_args)
 
     return trainer_configs
