@@ -328,6 +328,7 @@ class PQBASTLinear(nn.Module, lora_layer.LoraLayer):
         base_layer,
         adapter_name: str,
         transform_r_multiple: int = 1,
+        add_noise: bool = False,
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
@@ -358,6 +359,7 @@ class PQBASTLinear(nn.Module, lora_layer.LoraLayer):
         self.lora_transform_matrix_default_q = nn.Linear(self.out_features, transform_r, bias=False)
         self.lora_transform_matrix_default_s = nn.Linear(transform_r, self.in_features, bias=False)
         self.lora_transform_matrix_default_t = nn.Linear(self.in_features, transform_r, bias=False)
+        self.add_noise = add_noise
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -429,6 +431,14 @@ class PQBASTLinear(nn.Module, lora_layer.LoraLayer):
         for adapter in unique_adapters:
             sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
 
+        if self.add_noise:
+            normB = torch.norm(self.lora_B[adapter_names[0]].weight.data)
+            normA = torch.norm(self.lora_A[adapter_names[0]].weight.data)
+            # a matrix with shape (output_dim, r)
+            noise_B = torch.rand_like(self.lora_B[adapter_names[0]].weight.data) * normB
+            # a matrix with shape (r, input_dim)
+            noise_A = torch.rand_like(self.lora_A[adapter_names[0]].weight.data) * normA
+
         for i, active_adapter in enumerate(unique_adapters):
             if active_adapter == "__base__":
                 continue
@@ -443,11 +453,25 @@ class PQBASTLinear(nn.Module, lora_layer.LoraLayer):
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
+            sub_batch = dropout(sub_batch)
 
             ST_transformed_change = self.lora_transform_matrix_default_s(
                 self.lora_transform_matrix_default_t(sub_batch)
             )
-            lora_change = lora_B(lora_A(dropout(ST_transformed_change)))
+            # lora_change = lora_B(lora_A(dropout(ST_transformed_change)))
+            lora_change = lora_B(lora_A(ST_transformed_change))
+            if self.add_noise:
+                # normB = torch.norm(lora_B.weight.data)
+                # normA = torch.norm(lora_A.weight.data)
+                # noise_B = torch.rand_like(lora_B.weight.data) * normB
+                # noise_A = torch.rand_like(lora_A.weight.data) * normA
+                noise_lora_output = torch.matmul(
+                    noise_B, torch.matmul(
+                        noise_A, ST_transformed_change
+                    )
+                )
+                alpha = 0.01
+                lora_change = lora_change + alpha * noise_lora_output
             transformed_change = self.lora_transform_matrix_default_p(
                 self.lora_transform_matrix_default_q(lora_change)
             )
@@ -1106,8 +1130,11 @@ def dispatch_PQBAST_transform_lora(
             kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
         kwargs.update(lora_config.loftq_config)
         transform_r_multiple = lora_config.transform_r_multiple
+        add_noise = lora_config.add_noise
         new_module = PQBASTLinear(
-            target, adapter_name, transform_r_multiple=transform_r_multiple, **kwargs
+            target, adapter_name, transform_r_multiple=transform_r_multiple,
+            add_noise=add_noise,
+            **kwargs
         )
     elif isinstance(target_base_layer, Conv1D):
         raise NotImplementedError()

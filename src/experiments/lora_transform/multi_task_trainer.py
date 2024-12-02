@@ -66,6 +66,10 @@ FLAGS = flags.FLAGS
 @dataclass
 class LoraConfigV2(LoraConfig):
     transform_r_multiple: int = field(default=1, metadata={"help": "Lora attention dimension"})
+    add_noise: bool = field(
+        default=False,
+        metadata={"help": "whether add noise to the original lora weight during training"}
+    )
 
 def set_flags():
     flags.DEFINE_string(
